@@ -1,0 +1,29 @@
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+*.env
+.env
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+build/
+
+# Claves y secretos
+*-key.json
+*.pem
+
+# OS
+.DS_Store
