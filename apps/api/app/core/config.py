@@ -22,9 +22,9 @@ class Settings(BaseSettings):
     @property
     def database_url(self) -> str:
         if self.environment == "local":
-            return f"postgresql+psycopg2://{self.db_user}:{self.db_password}@localhost:5432/{self.db_name}"
+            return f"postgresql+psycopg://{self.db_user}:{self.db_password}@localhost:5432/{self.db_name}"
         socket_path = f"/cloudsql/{self.db_instance_connection_name}"
-        return f"postgresql+psycopg2://{self.db_user}:{self.db_password}@/{self.db_name}?host={socket_path}"
+        return f"postgresql+psycopg://{self.db_user}:{self.db_password}@/{self.db_name}?host={socket_path}"
 
     class Config:
         env_file = ".env"
