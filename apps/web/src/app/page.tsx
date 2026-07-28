@@ -1,11 +1,17 @@
-export default function Home() {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+"use client";
 
-  return (
-    <main style={{ fontFamily: "sans-serif", padding: "2rem" }}>
-      <h1>Control de Gasto - Sistemas</h1>
-      <p>Aplicacion en construccion (Etapa 1: infraestructura y esqueleto).</p>
-      <p>API configurada en: {apiUrl}</p>
-    </main>
-  );
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/lib/auth-context";
+
+export default function Home() {
+  const { user, loading } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (loading) return;
+    router.replace(user ? "/imports" : "/login");
+  }, [loading, user, router]);
+
+  return null;
 }
