@@ -7,11 +7,14 @@ const ESTADO_MAP: Record<string, { label: string; cls: string }> = {
   aprobado: { label: "Aprobado", cls: "status-ok" },
   rechazado: { label: "Rechazado", cls: "status-error" },
   anulado: { label: "Anulado", cls: "status-neutral" },
-  // filas de staging
+  // filas de staging: clasificacion de validacion
   valida: { label: "Válida", cls: "status-ok" },
   advertencia: { label: "Advertencia", cls: "status-warn" },
   error: { label: "Error", cls: "status-error" },
-  excluida: { label: "Excluida", cls: "status-neutral" },
+  // filas de staging: decision del usuario
+  pendiente: { label: "Pendiente", cls: "status-neutral" },
+  aprobada: { label: "Aprobada", cls: "status-ok" },
+  rechazada: { label: "Rechazada", cls: "status-error" },
 };
 
 export default function StatusBadge({ estado }: { estado: string }) {

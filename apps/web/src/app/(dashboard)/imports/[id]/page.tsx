@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import { api, ImportBatch, StagingRow, ApiError } from "@/lib/api";
 import StatusBadge from "@/components/StatusBadge";
@@ -15,15 +15,14 @@ function formatMonto(value: unknown) {
 
 export default function ImportDetailPage() {
   const params = useParams<{ id: string }>();
-  const router = useRouter();
   const batchId = Number(params.id);
 
   const [batch, setBatch] = useState<ImportBatch | null>(null);
   const [rows, setRows] = useState<StagingRow[] | null>(null);
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
-  const [actionLoading, setActionLoading] = useState(false);
+  const [rowActionLoading, setRowActionLoading] = useState<number | null>(null);
+  const [bulkLoading, setBulkLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -40,36 +39,57 @@ export default function ImportDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batchId]);
 
-  async function handleApprove() {
-    setActionLoading(true);
+  async function handleApproveRow(stagingId: number) {
+    setRowActionLoading(stagingId);
     setError(null);
     try {
-      const res = await api.approveImport(batchId);
-      setSuccessMsg(
-        `Carga aprobada: ${res.filas_aprobadas} facturas cargadas` +
-          (res.filas_excluidas_por_error > 0
-            ? `, ${res.filas_excluidas_por_error} excluidas por tener errores bloqueantes.`
-            : ".")
-      );
+      await api.approveRow(stagingId);
       await load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudo aprobar la carga.");
+      setError(err instanceof ApiError ? err.message : "No se pudo aprobar esta factura.");
     } finally {
-      setActionLoading(false);
+      setRowActionLoading(null);
     }
   }
 
-  async function handleReject() {
-    const motivo = window.prompt("Motivo del rechazo (opcional):") || undefined;
-    setActionLoading(true);
+  async function handleRejectRow(stagingId: number) {
+    const motivo = window.prompt("Motivo del rechazo (opcional):") ?? undefined;
+    setRowActionLoading(stagingId);
+    setError(null);
+    try {
+      await api.rejectRow(stagingId, motivo);
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo rechazar esta factura.");
+    } finally {
+      setRowActionLoading(null);
+    }
+  }
+
+  async function handleApprovePendientes() {
+    setBulkLoading(true);
+    setError(null);
+    try {
+      await api.approveImport(batchId);
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudieron aprobar las facturas pendientes.");
+    } finally {
+      setBulkLoading(false);
+    }
+  }
+
+  async function handleRejectPendientes() {
+    const motivo = window.prompt("Motivo del rechazo para todas las pendientes (opcional):") ?? undefined;
+    setBulkLoading(true);
     setError(null);
     try {
       await api.rejectImport(batchId, motivo);
       await load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudo rechazar la carga.");
+      setError(err instanceof ApiError ? err.message : "No se pudieron rechazar las facturas pendientes.");
     } finally {
-      setActionLoading(false);
+      setBulkLoading(false);
     }
   }
 
@@ -90,7 +110,8 @@ export default function ImportDetailPage() {
     return <div className="muted">Cargando...</div>;
   }
 
-  const puedeAprobar = batch.estado === "pendiente_validacion" || batch.estado === "con_errores";
+  const pendientes = rows.filter((r) => r.resultado === "pendiente");
+  const hayPendientes = pendientes.length > 0;
 
   return (
     <div>
@@ -109,19 +130,23 @@ export default function ImportDetailPage() {
           </div>
         </div>
 
-        {puedeAprobar && (
-          <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn btn-danger" onClick={handleReject} disabled={actionLoading}>
-              Rechazar
-            </button>
-            <button className="btn btn-primary" onClick={handleApprove} disabled={actionLoading}>
-              {actionLoading ? "Procesando..." : "Aprobar carga"}
-            </button>
+        {hayPendientes && (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+            <div className="faint" style={{ fontSize: 11 }}>
+              {pendientes.length} factura{pendientes.length !== 1 ? "s" : ""} pendiente{pendientes.length !== 1 ? "s" : ""}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn btn-danger" onClick={handleRejectPendientes} disabled={bulkLoading}>
+                Rechazar pendientes
+              </button>
+              <button className="btn btn-primary" onClick={handleApprovePendientes} disabled={bulkLoading}>
+                {bulkLoading ? "Procesando..." : "Aprobar pendientes"}
+              </button>
+            </div>
           </div>
         )}
       </div>
 
-      {successMsg && <div className="card" style={{ padding: 14, marginBottom: 16, borderColor: "var(--ok)", color: "var(--ok)" }}>{successMsg}</div>}
       {error && <div className="error-banner" style={{ marginBottom: 16 }}>{error}</div>}
 
       {batch.resumen && (
@@ -138,29 +163,31 @@ export default function ImportDetailPage() {
         <table className="ledger">
           <thead>
             <tr>
-              <th style={{ width: 40 }} />
-              <th>Estado</th>
+              <th>Validación</th>
+              <th>Decisión</th>
               <th>Proveedor</th>
               <th>N° Factura</th>
               <th>Fecha</th>
               <th style={{ textAlign: "right" }}>Importe</th>
               <th>Descripción</th>
+              <th style={{ width: 190 }} />
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => {
               const m = row.datos_mapeados;
               const isExpanded = expandedRow === row.id;
+              const isLoadingThis = rowActionLoading === row.id;
+              const yaDecidida = row.resultado !== "pendiente";
+
               return (
                 <>
-                  <tr
-                    key={row.id}
-                    onClick={() => setExpandedRow(isExpanded ? null : row.id)}
-                    style={{ cursor: "pointer" }}
-                  >
-                    <td className="faint mono">{row.errores.length > 0 ? row.errores.length : ""}</td>
+                  <tr key={row.id} style={{ opacity: yaDecidida ? 0.65 : 1 }}>
                     <td>
                       <StatusBadge estado={row.estado_fila} />
+                    </td>
+                    <td>
+                      <StatusBadge estado={row.resultado} />
                     </td>
                     <td>{String(m.proveedor_razon_social ?? "—")}</td>
                     <td className="mono">{String(m.numero_factura ?? "—")}</td>
@@ -170,14 +197,48 @@ export default function ImportDetailPage() {
                     <td className="mono" style={{ textAlign: "right" }}>
                       {formatMonto(m.importe_total)} {String(m.moneda ?? "")}
                     </td>
-                    <td className="muted" style={{ maxWidth: 320 }}>
-                      {String(m.descripcion ?? "—")}
+                    <td className="muted" style={{ maxWidth: 280 }}>
+                      <button
+                        onClick={() => setExpandedRow(isExpanded ? null : row.id)}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          color: "inherit",
+                          textAlign: "left",
+                          cursor: "pointer",
+                          padding: 0,
+                          font: "inherit",
+                        }}
+                      >
+                        {String(m.descripcion ?? "—")}
+                      </button>
+                    </td>
+                    <td>
+                      {!yaDecidida && (
+                        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                          <button
+                            className="btn btn-danger"
+                            style={{ padding: "4px 8px", fontSize: 11.5 }}
+                            onClick={() => handleRejectRow(row.id)}
+                            disabled={isLoadingThis}
+                          >
+                            Rechazar
+                          </button>
+                          <button
+                            className="btn btn-primary"
+                            style={{ padding: "4px 8px", fontSize: 11.5 }}
+                            onClick={() => handleApproveRow(row.id)}
+                            disabled={isLoadingThis}
+                          >
+                            {isLoadingThis ? "..." : "Aprobar"}
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                   {isExpanded && (
                     <tr key={`${row.id}-detail`}>
-                      <td />
-                      <td colSpan={6} style={{ background: "var(--surface-raised)", padding: 16 }}>
+                      <td colSpan={8} style={{ background: "var(--surface-raised)", padding: 16 }}>
                         {row.errores.length > 0 && (
                           <div style={{ marginBottom: 12, display: "flex", flexDirection: "column", gap: 6 }}>
                             {row.errores.map((e, i) => (
@@ -188,9 +249,14 @@ export default function ImportDetailPage() {
                             ))}
                           </div>
                         )}
-                        <div className="faint" style={{ fontSize: 12 }}>
+                        <div className="faint" style={{ fontSize: 12, marginBottom: row.motivo_rechazo ? 6 : 0 }}>
                           Descripción completa: <span className="muted">{String(m.descripcion ?? "—")}</span>
                         </div>
+                        {row.motivo_rechazo && (
+                          <div className="faint" style={{ fontSize: 12 }}>
+                            Motivo del rechazo: <span className="muted">{row.motivo_rechazo}</span>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   )}

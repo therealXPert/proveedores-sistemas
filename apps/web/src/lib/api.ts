@@ -69,7 +69,19 @@ export const api = {
     ),
 
   rejectImport: (id: number, motivo?: string) =>
-    request<{ estado: string }>(`/imports/${id}/reject`, {
+    request<{ filas_rechazadas: number }>(`/imports/${id}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ motivo }),
+    }),
+
+  approveRow: (stagingId: number) =>
+    request<{ staging_id: number; invoice_id: number; resultado: string }>(
+      `/imports/staging/${stagingId}/approve`,
+      { method: "POST", body: "" }
+    ),
+
+  rejectRow: (stagingId: number, motivo?: string) =>
+    request<{ staging_id: number; resultado: string }>(`/imports/staging/${stagingId}/reject`, {
       method: "POST",
       body: JSON.stringify({ motivo }),
     }),
@@ -101,7 +113,10 @@ export type ValidationErrorOut = {
 
 export type StagingRow = {
   id: number;
-  estado_fila: "valida" | "advertencia" | "error" | "excluida";
+  estado_fila: "valida" | "advertencia" | "error";
+  resultado: "pendiente" | "aprobada" | "rechazada";
+  invoice_id: number | null;
+  motivo_rechazo: string | null;
   datos_mapeados: Record<string, unknown>;
   errores: ValidationErrorOut[];
 };
