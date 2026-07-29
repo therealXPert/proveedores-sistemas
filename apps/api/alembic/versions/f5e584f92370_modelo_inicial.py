@@ -1,8 +1,8 @@
 """modelo inicial
 
-Revision ID: 026710acade6
+Revision ID: f5e584f92370
 Revises: 
-Create Date: 2026-07-27 21:22:39.659113
+Create Date: 2026-07-28 20:46:51.593702
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '026710acade6'
+revision: str = 'f5e584f92370'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -376,12 +376,19 @@ def upgrade() -> None:
     sa.Column('datos_crudos_json', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=False),
     sa.Column('datos_mapeados_json', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=True),
     sa.Column('estado_fila', sa.String(length=30), nullable=False),
+    sa.Column('resultado', sa.String(length=20), nullable=False),
+    sa.Column('invoice_id', sa.Integer(), nullable=True),
+    sa.Column('motivo_rechazo', sa.Text(), nullable=True),
+    sa.Column('procesado_por_id', sa.Integer(), nullable=True),
+    sa.Column('procesado_en', sa.DateTime(), nullable=True),
     sa.Column('es_duplicado_de_invoice_id', sa.Integer(), nullable=True),
     sa.Column('motivo_cambio_categoria', sa.Text(), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=False),
     sa.Column('updated_at', sa.DateTime(), nullable=False),
     sa.ForeignKeyConstraint(['es_duplicado_de_invoice_id'], ['invoices.id'], ),
     sa.ForeignKeyConstraint(['import_batch_id'], ['import_batches.id'], ),
+    sa.ForeignKeyConstraint(['invoice_id'], ['invoices.id'], ),
+    sa.ForeignKeyConstraint(['procesado_por_id'], ['users.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('validation_errors',
