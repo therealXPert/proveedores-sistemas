@@ -40,6 +40,24 @@ class ApproveRowResponse(BaseModel):
     resultado: str = "aprobada"
 
 
+class StagingRowUpdate(BaseModel):
+    numero_factura: Optional[str] = None
+    fecha_emision: Optional[str] = None
+    importe_total: Optional[float] = None
+    moneda: Optional[str] = None
+    tipo_documento: Optional[str] = None
+    descripcion: Optional[str] = None
+    orden_compra: Optional[str] = None
+    observaciones: Optional[str] = None
+    provider_id: Optional[int] = None
+    area_id: Optional[int] = None
+    category_id: Optional[int] = None
+    cost_center_id: Optional[int] = None
+    business_unit_id: Optional[int] = None
+    company_id: Optional[int] = None
+    branch_id: Optional[int] = None
+
+
 class ImportBatchSummary(BaseModel):
     validos: int
     advertencias: int

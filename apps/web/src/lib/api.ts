@@ -85,6 +85,40 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ motivo }),
     }),
+
+  updateRow: (stagingId: number, updates: StagingRowUpdate) =>
+    request<StagingRow>(`/imports/staging/${stagingId}`, {
+      method: "PATCH",
+      body: JSON.stringify(updates),
+    }),
+
+  listProviders: () => request<CatalogItem[]>("/catalogs/providers"),
+  listAreas: () => request<CatalogItem[]>("/catalogs/areas"),
+  listCategories: () => request<CatalogItem[]>("/catalogs/categories"),
+  listCostCenters: () => request<CatalogItem[]>("/catalogs/cost-centers"),
+  listBusinessUnits: () => request<CatalogItem[]>("/catalogs/business-units"),
+  listCompanies: () => request<CatalogItem[]>("/catalogs/companies"),
+  listBranches: () => request<CatalogItem[]>("/catalogs/branches"),
+};
+
+export type CatalogItem = { id: number; nombre: string };
+
+export type StagingRowUpdate = {
+  numero_factura?: string;
+  fecha_emision?: string;
+  importe_total?: number;
+  moneda?: string;
+  tipo_documento?: string;
+  descripcion?: string;
+  orden_compra?: string;
+  observaciones?: string;
+  provider_id?: number;
+  area_id?: number;
+  category_id?: number;
+  cost_center_id?: number;
+  business_unit_id?: number;
+  company_id?: number;
+  branch_id?: number;
 };
 
 export type ImportBatchSummary = {

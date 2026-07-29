@@ -12,6 +12,7 @@ from app.schemas.importing import (
     RejectBatchRequest,
     RejectRowRequest,
     ApproveRowResponse,
+    StagingRowUpdate,
 )
 from app.services.import_service import process_uploaded_file
 from app.services.approval_service import (
@@ -20,6 +21,7 @@ from app.services.approval_service import (
     approve_staging_row,
     reject_staging_row,
 )
+from app.services.staging_edit_service import update_staging_row
 
 router = APIRouter(prefix="/imports", tags=["imports"])
 
@@ -93,6 +95,22 @@ def preview_batch(
 
 
 # --- Acciones por factura individual (la forma principal de trabajar) ---
+
+
+@router.patch("/staging/{staging_id}", response_model=StagingInvoiceOut)
+def update_row(
+    staging_id: int,
+    payload: StagingRowUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("Administrador", "Analista")),
+):
+    staging = _get_staging_or_404(db, staging_id)
+    updates = payload.model_dump(exclude_unset=True)
+    try:
+        update_staging_row(db, staging, updates, current_user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return staging
 
 
 @router.post("/staging/{staging_id}/approve", response_model=ApproveRowResponse)

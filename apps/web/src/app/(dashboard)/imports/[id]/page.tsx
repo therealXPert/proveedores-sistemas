@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { api, ImportBatch, StagingRow, ApiError } from "@/lib/api";
+import { api, ImportBatch, StagingRow, StagingRowUpdate, CatalogItem, ApiError } from "@/lib/api";
 import StatusBadge from "@/components/StatusBadge";
+import EditStagingRowForm from "@/components/EditStagingRowForm";
 
 function formatMonto(value: unknown) {
   if (value === null || value === undefined || value === "") return "—";
@@ -13,13 +14,41 @@ function formatMonto(value: unknown) {
   return n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+type Catalogs = {
+  providers: CatalogItem[];
+  areas: CatalogItem[];
+  categories: CatalogItem[];
+  costCenters: CatalogItem[];
+  businessUnits: CatalogItem[];
+  companies: CatalogItem[];
+  branches: CatalogItem[];
+};
+
+const EMPTY_CATALOGS: Catalogs = {
+  providers: [],
+  areas: [],
+  categories: [],
+  costCenters: [],
+  businessUnits: [],
+  companies: [],
+  branches: [],
+};
+
+function nombreCatalogo(items: CatalogItem[], id: unknown): string {
+  if (id === null || id === undefined) return "—";
+  const found = items.find((i) => i.id === Number(id));
+  return found ? found.nombre : "—";
+}
+
 export default function ImportDetailPage() {
   const params = useParams<{ id: string }>();
   const batchId = Number(params.id);
 
   const [batch, setBatch] = useState<ImportBatch | null>(null);
   const [rows, setRows] = useState<StagingRow[] | null>(null);
+  const [catalogs, setCatalogs] = useState<Catalogs>(EMPTY_CATALOGS);
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
+  const [editingRow, setEditingRow] = useState<number | null>(null);
   const [rowActionLoading, setRowActionLoading] = useState<number | null>(null);
   const [bulkLoading, setBulkLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,8 +63,26 @@ export default function ImportDetailPage() {
     }
   }
 
+  async function loadCatalogs() {
+    try {
+      const [providers, areas, categories, costCenters, businessUnits, companies, branches] = await Promise.all([
+        api.listProviders(),
+        api.listAreas(),
+        api.listCategories(),
+        api.listCostCenters(),
+        api.listBusinessUnits(),
+        api.listCompanies(),
+        api.listBranches(),
+      ]);
+      setCatalogs({ providers, areas, categories, costCenters, businessUnits, companies, branches });
+    } catch {
+      // los catalogos son para el formulario de edicion; si fallan, igual se puede ver/aprobar/rechazar
+    }
+  }
+
   useEffect(() => {
     load();
+    loadCatalogs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batchId]);
 
@@ -61,6 +108,20 @@ export default function ImportDetailPage() {
       await load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo rechazar esta factura.");
+    } finally {
+      setRowActionLoading(null);
+    }
+  }
+
+  async function handleSaveEdit(stagingId: number, updates: StagingRowUpdate) {
+    setRowActionLoading(stagingId);
+    setError(null);
+    try {
+      await api.updateRow(stagingId, updates);
+      setEditingRow(null);
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudieron guardar los cambios.");
     } finally {
       setRowActionLoading(null);
     }
@@ -170,13 +231,14 @@ export default function ImportDetailPage() {
               <th>Fecha</th>
               <th style={{ textAlign: "right" }}>Importe</th>
               <th>Descripción</th>
-              <th style={{ width: 190 }} />
+              <th style={{ width: 230 }} />
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => {
               const m = row.datos_mapeados;
               const isExpanded = expandedRow === row.id;
+              const isEditing = editingRow === row.id;
               const isLoadingThis = rowActionLoading === row.id;
               const yaDecidida = row.resultado !== "pendiente";
 
@@ -189,7 +251,7 @@ export default function ImportDetailPage() {
                     <td>
                       <StatusBadge estado={row.resultado} />
                     </td>
-                    <td>{String(m.proveedor_razon_social ?? "—")}</td>
+                    <td>{nombreCatalogo(catalogs.providers, m.provider_id) !== "—" ? nombreCatalogo(catalogs.providers, m.provider_id) : String(m.proveedor_razon_social ?? "—")}</td>
                     <td className="mono">{String(m.numero_factura ?? "—")}</td>
                     <td className="mono">
                       {m.fecha_emision ? new Date(String(m.fecha_emision)).toLocaleDateString("es-AR") : "—"}
@@ -197,9 +259,12 @@ export default function ImportDetailPage() {
                     <td className="mono" style={{ textAlign: "right" }}>
                       {formatMonto(m.importe_total)} {String(m.moneda ?? "")}
                     </td>
-                    <td className="muted" style={{ maxWidth: 280 }}>
+                    <td className="muted" style={{ maxWidth: 260 }}>
                       <button
-                        onClick={() => setExpandedRow(isExpanded ? null : row.id)}
+                        onClick={() => {
+                          setExpandedRow(isExpanded ? null : row.id);
+                          if (isEditing) setEditingRow(null);
+                        }}
                         style={{
                           background: "none",
                           border: "none",
@@ -214,8 +279,19 @@ export default function ImportDetailPage() {
                       </button>
                     </td>
                     <td>
-                      {!yaDecidida && (
+                      {!yaDecidida && !isEditing && (
                         <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                          <button
+                            className="btn"
+                            style={{ padding: "4px 8px", fontSize: 11.5 }}
+                            onClick={() => {
+                              setEditingRow(row.id);
+                              setExpandedRow(row.id);
+                            }}
+                            disabled={isLoadingThis}
+                          >
+                            Editar
+                          </button>
                           <button
                             className="btn btn-danger"
                             style={{ padding: "4px 8px", fontSize: 11.5 }}
@@ -239,23 +315,45 @@ export default function ImportDetailPage() {
                   {isExpanded && (
                     <tr key={`${row.id}-detail`}>
                       <td colSpan={8} style={{ background: "var(--surface-raised)", padding: 16 }}>
-                        {row.errores.length > 0 && (
-                          <div style={{ marginBottom: 12, display: "flex", flexDirection: "column", gap: 6 }}>
-                            {row.errores.map((e, i) => (
-                              <div key={i} style={{ fontSize: 12.5 }}>
-                                <StatusBadge estado={e.severidad === "bloqueante" ? "error" : "advertencia"} />{" "}
-                                <span className="muted">{e.mensaje}</span>
+                        {isEditing ? (
+                          <EditStagingRowForm
+                            row={row}
+                            catalogs={catalogs}
+                            saving={isLoadingThis}
+                            onCancel={() => setEditingRow(null)}
+                            onSave={(updates) => handleSaveEdit(row.id, updates)}
+                          />
+                        ) : (
+                          <>
+                            {row.errores.length > 0 && (
+                              <div style={{ marginBottom: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+                                {row.errores.map((e, i) => (
+                                  <div key={i} style={{ fontSize: 12.5 }}>
+                                    <StatusBadge estado={e.severidad === "bloqueante" ? "error" : "advertencia"} />{" "}
+                                    <span className="muted">{e.mensaje}</span>
+                                  </div>
+                                ))}
                               </div>
-                            ))}
-                          </div>
-                        )}
-                        <div className="faint" style={{ fontSize: 12, marginBottom: row.motivo_rechazo ? 6 : 0 }}>
-                          Descripción completa: <span className="muted">{String(m.descripcion ?? "—")}</span>
-                        </div>
-                        {row.motivo_rechazo && (
-                          <div className="faint" style={{ fontSize: 12 }}>
-                            Motivo del rechazo: <span className="muted">{row.motivo_rechazo}</span>
-                          </div>
+                            )}
+                            <div className="faint" style={{ fontSize: 12, marginBottom: 4 }}>
+                              Descripción completa: <span className="muted">{String(m.descripcion ?? "—")}</span>
+                            </div>
+                            <div className="faint" style={{ fontSize: 12, marginBottom: 4 }}>
+                              Área: <span className="muted">{nombreCatalogo(catalogs.areas, m.area_id)}</span>
+                              {"  ·  "}Categoría: <span className="muted">{nombreCatalogo(catalogs.categories, m.category_id)}</span>
+                              {"  ·  "}Centro de costo: <span className="muted">{nombreCatalogo(catalogs.costCenters, m.cost_center_id)}</span>
+                            </div>
+                            <div className="faint" style={{ fontSize: 12, marginBottom: row.motivo_rechazo ? 6 : 0 }}>
+                              Unidad de negocio: <span className="muted">{nombreCatalogo(catalogs.businessUnits, m.business_unit_id)}</span>
+                              {"  ·  "}Empresa: <span className="muted">{nombreCatalogo(catalogs.companies, m.company_id)}</span>
+                              {"  ·  "}Sucursal: <span className="muted">{nombreCatalogo(catalogs.branches, m.branch_id)}</span>
+                            </div>
+                            {row.motivo_rechazo && (
+                              <div className="faint" style={{ fontSize: 12 }}>
+                                Motivo del rechazo: <span className="muted">{row.motivo_rechazo}</span>
+                              </div>
+                            )}
+                          </>
                         )}
                       </td>
                     </tr>

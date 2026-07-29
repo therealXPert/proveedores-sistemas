@@ -198,3 +198,73 @@ def test_approve_pending_in_batch_respeta_decisiones_previas(db_session, admin_u
     assert filas[0].resultado == "rechazada"  # no se toco
     assert resultado["filas_aprobadas"] == len(filas) - 1
     assert db_session.query(Invoice).count() == len(filas) - 1
+
+
+def test_editar_fila_corrige_importe_invalido(db_session, admin_user, seeded_catalogs):
+    """El fixture no trae filas con importe invalido, asi que forzamos el caso a mano."""
+    from app.services.staging_edit_service import update_staging_row
+
+    batch = process_uploaded_file(db_session, admin_user.id, "tsdocs_sample.csv", _load_fixture_bytes())
+    fila = batch.staging_invoices[0]
+
+    # Rompemos el importe a mano para simular una fila invalida
+    m = dict(fila.datos_mapeados_json)
+    m["importe_total"] = None
+    fila.datos_mapeados_json = m
+    fila.estado_fila = "error"
+    db_session.commit()
+
+    update_staging_row(db_session, fila, {"importe_total": 12345.67}, admin_user.id)
+
+    assert fila.datos_mapeados_json["importe_total"] == "12345.67"
+    assert fila.estado_fila in ("valida", "advertencia")  # ya no deberia quedar en 'error' por importe
+
+
+def test_editar_fila_recalcula_duplicado_al_corregir_numero_factura(db_session, admin_user, seeded_catalogs):
+    """Si el usuario corrige un numero de factura mal tipeado, el falso duplicado debe desaparecer."""
+    from app.services.approval_service import approve_staging_row
+    from app.services.staging_edit_service import update_staging_row
+
+    batch1 = process_uploaded_file(db_session, admin_user.id, "tsdocs_sample.csv", _load_fixture_bytes())
+    aprobada = next(f for f in batch1.staging_invoices if f.datos_mapeados_json.get("numero_factura") == "00003-00004376")
+    approve_staging_row(db_session, aprobada, admin_user.id)
+
+    batch2 = process_uploaded_file(db_session, admin_user.id, "tsdocs_sample.csv", _load_fixture_bytes())
+    duplicada = next(f for f in batch2.staging_invoices if f.datos_mapeados_json.get("numero_factura") == "00003-00004376")
+    assert any(e.tipo == "duplicado_factura_existente" for e in duplicada.errores)
+
+    # El usuario corrige el numero de factura (era un typo)
+    update_staging_row(db_session, duplicada, {"numero_factura": "00003-00004377"}, admin_user.id)
+
+    assert not any(e.tipo == "duplicado_factura_existente" for e in duplicada.errores)
+    assert duplicada.es_duplicado_de_invoice_id is None
+
+
+def test_no_se_puede_editar_una_fila_ya_procesada(db_session, admin_user, seeded_catalogs):
+    from app.services.approval_service import approve_staging_row
+    from app.services.staging_edit_service import update_staging_row
+
+    batch = process_uploaded_file(db_session, admin_user.id, "tsdocs_sample.csv", _load_fixture_bytes())
+    fila = batch.staging_invoices[0]
+    approve_staging_row(db_session, fila, admin_user.id)
+
+    with __import__("pytest").raises(ValueError):
+        update_staging_row(db_session, fila, {"descripcion": "cambio no permitido"}, admin_user.id)
+
+
+def test_editar_fila_permite_cambiar_proveedor(db_session, admin_user, seeded_catalogs):
+    from app.models.catalog import Provider
+    from app.services.staging_edit_service import update_staging_row
+
+    batch = process_uploaded_file(db_session, admin_user.id, "tsdocs_sample.csv", _load_fixture_bytes())
+    fila = batch.staging_invoices[0]
+
+    otro_proveedor = Provider(nombre_normalizado="Proveedor Correcto SA")
+    db_session.add(otro_proveedor)
+    db_session.commit()
+
+    update_staging_row(db_session, fila, {"provider_id": otro_proveedor.id}, admin_user.id)
+
+    assert fila.datos_mapeados_json["provider_id"] == otro_proveedor.id
+    # Ya no deberia quedar la advertencia de "proveedor creado automaticamente"
+    assert not any(e.tipo == "proveedor_creado_automaticamente" for e in fila.errores)

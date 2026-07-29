@@ -21,6 +21,9 @@ node_modules/
 out/
 build/
 
+# Almacenamiento local de desarrollo (fallback cuando no hay GCS configurado)
+apps/api/local_storage/
+
 # Claves y secretos
 *-key.json
 *.pem

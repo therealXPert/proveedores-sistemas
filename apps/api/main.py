@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
-from app.api import health, auth, imports
+from app.api import health, auth, imports, catalogs
 
 app = FastAPI(title=settings.app_name)
 
@@ -17,6 +17,7 @@ app.add_middleware(
 app.include_router(health.router, tags=["health"])
 app.include_router(auth.router)
 app.include_router(imports.router)
+app.include_router(catalogs.router)
 
 
 @app.get("/")
