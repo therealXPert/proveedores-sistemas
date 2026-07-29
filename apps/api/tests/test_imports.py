@@ -8,7 +8,7 @@ negativo inesperado), y el flujo de aprobacion.
 from pathlib import Path
 
 from app.services.import_service import process_uploaded_file
-from app.services.approval_service import approve_batch
+from app.services.approval_service import approve_pending_in_batch
 from app.models.invoicing import Invoice
 from app.models.catalog import Provider, Area
 
@@ -66,7 +66,7 @@ def test_areas_normalizadas_se_crean(db_session, admin_user, seeded_catalogs):
 
 def test_approve_batch_crea_invoices_para_filas_no_bloqueantes(db_session, admin_user, seeded_catalogs):
     batch = process_uploaded_file(db_session, admin_user.id, "tsdocs_sample.csv", _load_fixture_bytes())
-    resultado = approve_batch(db_session, batch, admin_user.id)
+    resultado = approve_pending_in_batch(db_session, batch, admin_user.id)
 
     # Ninguna fila del fixture es bloqueante (todo lo malo es 'advertencia'), asi que las 5 se aprueban
     assert resultado["filas_aprobadas"] == 5
@@ -77,7 +77,7 @@ def test_approve_batch_crea_invoices_para_filas_no_bloqueantes(db_session, admin
 
 def test_segunda_importacion_detecta_duplicado_contra_aprobadas(db_session, admin_user, seeded_catalogs):
     batch1 = process_uploaded_file(db_session, admin_user.id, "tsdocs_sample.csv", _load_fixture_bytes())
-    approve_batch(db_session, batch1, admin_user.id)
+    approve_pending_in_batch(db_session, batch1, admin_user.id)
 
     # Se vuelve a subir el mismo archivo: ahora TODAS las filas deberian marcarse como duplicado
     # contra facturas ya aprobadas (bloqueante), salvo que la logica de deteccion falle.
@@ -113,9 +113,88 @@ def test_approve_batch_con_muchas_filas_no_falla(db_session, admin_user, seeded_
     batch = process_uploaded_file(db_session, admin_user.id, "prueba_100_filas.csv", contenido)
     assert batch.resumen_json["total_filas"] == 100
 
-    from app.services.approval_service import approve_batch
-    resultado = approve_batch(db_session, batch, admin_user.id)
+    from app.services.approval_service import approve_pending_in_batch
+    resultado = approve_pending_in_batch(db_session, batch, admin_user.id)
     assert resultado["filas_aprobadas"] == 100
 
     from app.models.invoicing import Invoice
     assert db_session.query(Invoice).count() == 100
+
+
+def test_approve_una_sola_fila_no_afecta_al_resto(db_session, admin_user, seeded_catalogs):
+    """El punto central del pedido: aprobar/rechazar factura por factura, no solo el lote entero."""
+    from app.services.approval_service import approve_staging_row, reject_staging_row
+
+    batch = process_uploaded_file(db_session, admin_user.id, "tsdocs_sample.csv", _load_fixture_bytes())
+    filas = batch.staging_invoices
+
+    # Aprobamos la primera fila nomas
+    invoice = approve_staging_row(db_session, filas[0], admin_user.id)
+    assert invoice.id is not None
+    assert filas[0].resultado == "aprobada"
+    assert filas[0].invoice_id == invoice.id
+
+    # El resto sigue pendiente, el batch todavia no esta cerrado
+    assert all(f.resultado == "pendiente" for f in filas[1:])
+    assert batch.estado in ("pendiente_validacion", "con_errores")
+
+    # Rechazamos la segunda
+    reject_staging_row(db_session, filas[1], admin_user.id, "duplicada con otra carga")
+    assert filas[1].resultado == "rechazada"
+    assert filas[1].motivo_rechazo == "duplicada con otra carga"
+
+    assert db_session.query(Invoice).count() == 1
+
+
+def test_no_se_puede_procesar_una_fila_dos_veces(db_session, admin_user, seeded_catalogs):
+    from app.services.approval_service import approve_staging_row
+
+    batch = process_uploaded_file(db_session, admin_user.id, "tsdocs_sample.csv", _load_fixture_bytes())
+    fila = batch.staging_invoices[0]
+
+    approve_staging_row(db_session, fila, admin_user.id)
+    with __import__("pytest").raises(ValueError):
+        approve_staging_row(db_session, fila, admin_user.id)
+
+
+def test_batch_pasa_a_aprobado_cuando_no_quedan_filas_pendientes(db_session, admin_user, seeded_catalogs):
+    from app.services.approval_service import approve_staging_row, reject_staging_row
+
+    batch = process_uploaded_file(db_session, admin_user.id, "tsdocs_sample.csv", _load_fixture_bytes())
+    filas = batch.staging_invoices
+
+    for i, fila in enumerate(filas):
+        if i == 0:
+            reject_staging_row(db_session, fila, admin_user.id, "no corresponde")
+        else:
+            approve_staging_row(db_session, fila, admin_user.id)
+
+    assert batch.estado == "aprobado"
+    assert db_session.query(Invoice).count() == len(filas) - 1
+
+
+def test_batch_queda_rechazado_si_se_rechazan_todas_las_filas(db_session, admin_user, seeded_catalogs):
+    from app.services.approval_service import reject_staging_row
+
+    batch = process_uploaded_file(db_session, admin_user.id, "tsdocs_sample.csv", _load_fixture_bytes())
+    for fila in batch.staging_invoices:
+        reject_staging_row(db_session, fila, admin_user.id, "archivo incorrecto")
+
+    assert batch.estado == "rechazado"
+    assert db_session.query(Invoice).count() == 0
+
+
+def test_approve_pending_in_batch_respeta_decisiones_previas(db_session, admin_user, seeded_catalogs):
+    """El atajo de lote no debe re-procesar filas que un usuario ya decidio individualmente."""
+    from app.services.approval_service import reject_staging_row, approve_pending_in_batch
+
+    batch = process_uploaded_file(db_session, admin_user.id, "tsdocs_sample.csv", _load_fixture_bytes())
+    filas = batch.staging_invoices
+
+    reject_staging_row(db_session, filas[0], admin_user.id, "no corresponde")
+
+    resultado = approve_pending_in_batch(db_session, batch, admin_user.id)
+
+    assert filas[0].resultado == "rechazada"  # no se toco
+    assert resultado["filas_aprobadas"] == len(filas) - 1
+    assert db_session.query(Invoice).count() == len(filas) - 1

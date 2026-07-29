@@ -67,14 +67,28 @@ class ImportBatch(Base, TimestampMixin):
 
 
 class StagingInvoice(Base, TimestampMixin):
-    """Fila cruda + mapeada de un CSV, antes de convertirse en Invoice definitiva."""
+    """
+    Fila cruda + mapeada de un CSV, antes de convertirse en Invoice definitiva.
+
+    Dos campos de estado con significados distintos, a proposito:
+    - estado_fila: clasificacion de VALIDACION (valida/advertencia/error), se calcula
+      una sola vez al importar y no cambia despues.
+    - resultado: DECISION del usuario sobre esta fila puntual (pendiente/aprobada/
+      rechazada). Permite aprobar o rechazar factura por factura, no solo el lote
+      completo -- si una fila esta mal, no hace falta rechazar todo el archivo.
+    """
     __tablename__ = "staging_invoices"
 
     id = Column(Integer, primary_key=True)
     import_batch_id = Column(Integer, ForeignKey("import_batches.id"), nullable=False)
     datos_crudos_json = Column(JSONType, nullable=False)  # la fila del CSV tal cual vino
     datos_mapeados_json = Column(JSONType, nullable=True)  # ya mapeada a campos internos, editable durante validacion
-    estado_fila = Column(String(30), nullable=False, default="pendiente")  # pendiente/valida/advertencia/error/excluida
+    estado_fila = Column(String(30), nullable=False, default="pendiente")  # valida/advertencia/error
+    resultado = Column(String(20), nullable=False, default="pendiente")  # pendiente/aprobada/rechazada
+    invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=True)  # factura generada, si se aprobo
+    motivo_rechazo = Column(Text, nullable=True)
+    procesado_por_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    procesado_en = Column(DateTime, nullable=True)
     es_duplicado_de_invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=True)
     motivo_cambio_categoria = Column(Text, nullable=True)  # comentario opcional si se cambio la categoria propuesta
 

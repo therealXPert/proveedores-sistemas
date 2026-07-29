@@ -4,15 +4,22 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.api.deps import get_current_user, require_role
 from app.models.security import User
-from app.models.importing import ImportBatch
+from app.models.importing import ImportBatch, StagingInvoice
 from app.schemas.importing import (
     ImportBatchOut,
     StagingInvoiceOut,
     ApproveBatchResponse,
     RejectBatchRequest,
+    RejectRowRequest,
+    ApproveRowResponse,
 )
 from app.services.import_service import process_uploaded_file
-from app.services.approval_service import approve_batch, reject_batch
+from app.services.approval_service import (
+    approve_pending_in_batch,
+    reject_pending_in_batch,
+    approve_staging_row,
+    reject_staging_row,
+)
 
 router = APIRouter(prefix="/imports", tags=["imports"])
 
@@ -25,6 +32,13 @@ def _get_batch_or_404(db: Session, batch_id: int) -> ImportBatch:
     if not batch:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Importacion no encontrada")
     return batch
+
+
+def _get_staging_or_404(db: Session, staging_id: int) -> StagingInvoice:
+    staging = db.query(StagingInvoice).filter(StagingInvoice.id == staging_id).first()
+    if not staging:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Factura en revisión no encontrada")
+    return staging
 
 
 @router.post("/upload", response_model=ImportBatchOut)
@@ -75,21 +89,46 @@ def preview_batch(
 ):
     """Vista previa completa, con la descripcion sin truncar (sección 5 del diseño)."""
     batch = _get_batch_or_404(db, batch_id)
-    return [
-        {
-            "id": s.id,
-            "estado_fila": s.estado_fila,
-            "datos_mapeados": s.datos_mapeados_json or {},
-            "errores": [
-                {"tipo": e.tipo, "severidad": e.severidad, "mensaje": e.mensaje} for e in s.errores
-            ],
-        }
-        for s in batch.staging_invoices
-    ]
+    return batch.staging_invoices
+
+
+# --- Acciones por factura individual (la forma principal de trabajar) ---
+
+
+@router.post("/staging/{staging_id}/approve", response_model=ApproveRowResponse)
+def approve_row(
+    staging_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("Administrador", "Analista")),
+):
+    staging = _get_staging_or_404(db, staging_id)
+    try:
+        invoice = approve_staging_row(db, staging, current_user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return ApproveRowResponse(staging_id=staging.id, invoice_id=invoice.id)
+
+
+@router.post("/staging/{staging_id}/reject")
+def reject_row(
+    staging_id: int,
+    payload: RejectRowRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("Administrador", "Analista")),
+):
+    staging = _get_staging_or_404(db, staging_id)
+    try:
+        reject_staging_row(db, staging, current_user.id, payload.motivo)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return {"staging_id": staging.id, "resultado": "rechazada"}
+
+
+# --- Atajos por lote: aplican la misma accion a todas las filas pendientes ---
 
 
 @router.post("/{batch_id}/approve", response_model=ApproveBatchResponse)
-def approve(
+def approve_batch_pending(
     batch_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("Administrador", "Analista")),
@@ -98,19 +137,19 @@ def approve(
     if batch.estado not in ("pendiente_validacion", "con_errores"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"No se puede aprobar una carga en estado '{batch.estado}'",
+            detail=f"No quedan facturas pendientes en esta carga (estado actual: '{batch.estado}')",
         )
-    resultado = approve_batch(db, batch, current_user.id)
+    resultado = approve_pending_in_batch(db, batch, current_user.id)
     return resultado
 
 
 @router.post("/{batch_id}/reject")
-def reject(
+def reject_batch_pending(
     batch_id: int,
     payload: RejectBatchRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("Administrador", "Analista")),
 ):
     batch = _get_batch_or_404(db, batch_id)
-    reject_batch(db, batch, current_user.id, payload.motivo)
-    return {"estado": "rechazado"}
+    resultado = reject_pending_in_batch(db, batch, current_user.id, payload.motivo)
+    return resultado

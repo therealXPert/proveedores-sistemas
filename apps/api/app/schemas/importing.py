@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ValidationErrorOut(BaseModel):
@@ -16,11 +16,28 @@ class ValidationErrorOut(BaseModel):
 class StagingInvoiceOut(BaseModel):
     id: int
     estado_fila: str
-    datos_mapeados: dict[str, Any]
+    resultado: str
+    invoice_id: Optional[int] = None
+    motivo_rechazo: Optional[str] = None
+    datos_mapeados: dict[str, Any] = Field(validation_alias="datos_mapeados_json")
     errores: list[ValidationErrorOut]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    @field_validator("datos_mapeados", mode="before")
+    @classmethod
+    def _default_empty(cls, v):
+        return v or {}
+
+
+class RejectRowRequest(BaseModel):
+    motivo: Optional[str] = None
+
+
+class ApproveRowResponse(BaseModel):
+    staging_id: int
+    invoice_id: int
+    resultado: str = "aprobada"
 
 
 class ImportBatchSummary(BaseModel):
