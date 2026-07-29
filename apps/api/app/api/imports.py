@@ -22,6 +22,7 @@ from app.services.approval_service import (
     reject_staging_row,
 )
 from app.services.staging_edit_service import update_staging_row
+from app.services.import_delete_service import delete_import_batch
 
 router = APIRouter(prefix="/imports", tags=["imports"])
 
@@ -41,6 +42,25 @@ def _get_staging_or_404(db: Session, staging_id: int) -> StagingInvoice:
     if not staging:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Factura en revisión no encontrada")
     return staging
+
+
+@router.delete("/{batch_id}")
+def delete_batch(
+    batch_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("Administrador")),
+):
+    """
+    Borra fisicamente una importacion: la carga en si, sus filas de staging, y
+    -- si ya estaba aprobada -- TAMBIEN las facturas que genero. Es un borrado
+    real, sin trazabilidad (a diferencia de la "anulacion" que describe la
+    sección 5 del diseño). Se implementa asi por pedido explicito para poder
+    deshacer pruebas sin tener que editar la base a mano; en un uso productivo
+    real conviene reemplazar esto por una anulacion logica que preserve
+    auditoria contable.
+    """
+    batch = _get_batch_or_404(db, batch_id)
+    return delete_import_batch(db, batch, current_user.id)
 
 
 @router.post("/upload", response_model=ImportBatchOut)

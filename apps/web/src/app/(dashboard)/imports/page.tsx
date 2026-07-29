@@ -12,6 +12,7 @@ function formatFecha(iso: string) {
 export default function ImportsPage() {
   const [batches, setBatches] = useState<ImportBatch[] | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -42,6 +43,31 @@ export default function ImportsPage() {
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  async function handleDelete(batch: ImportBatch) {
+    const mensaje =
+      batch.estado === "aprobado"
+        ? `Esta importación ya está APROBADA: sus datos ya están imputados en los reportes.\n\n` +
+          `Eliminarla también va a borrar todas las facturas aprobadas que generó (${batch.resumen?.validos ?? "?"} aprox.). ` +
+          `Esta acción no se puede deshacer.\n\n¿Confirmás que querés eliminarla igual?`
+        : `¿Eliminar esta importación (#${batch.id})? Esta acción no se puede deshacer.`;
+
+    if (!window.confirm(mensaje)) return;
+
+    setDeletingId(batch.id);
+    setError(null);
+    try {
+      const resultado = await api.deleteImport(batch.id);
+      if (resultado.facturas_eliminadas > 0) {
+        window.alert(`Importación eliminada junto con ${resultado.facturas_eliminadas} facturas aprobadas.`);
+      }
+      await loadBatches();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo eliminar la importación.");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -119,9 +145,19 @@ export default function ImportsPage() {
                   {b.resumen?.invalidos ?? "—"}
                 </td>
                 <td>
-                  <Link href={`/imports/${b.id}`} className="btn" style={{ padding: "5px 10px", fontSize: 12 }}>
-                    Revisar
-                  </Link>
+                  <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                    <Link href={`/imports/${b.id}`} className="btn" style={{ padding: "5px 10px", fontSize: 12 }}>
+                      Revisar
+                    </Link>
+                    <button
+                      className="btn btn-danger"
+                      style={{ padding: "5px 10px", fontSize: 12 }}
+                      onClick={() => handleDelete(b)}
+                      disabled={deletingId === b.id}
+                    >
+                      {deletingId === b.id ? "..." : "Eliminar"}
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

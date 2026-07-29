@@ -99,6 +99,51 @@ export const api = {
   listBusinessUnits: () => request<CatalogItem[]>("/catalogs/business-units"),
   listCompanies: () => request<CatalogItem[]>("/catalogs/companies"),
   listBranches: () => request<CatalogItem[]>("/catalogs/branches"),
+
+  deleteImport: (id: number) =>
+    request<{ eliminado: boolean; facturas_eliminadas: number }>(`/imports/${id}`, { method: "DELETE" }),
+
+  // --- Administracion de proveedores ---
+  listProvidersAdmin: () => request<Provider[]>("/providers"),
+  getProvider: (id: number) => request<Provider>(`/providers/${id}`),
+  updateProvider: (id: number, updates: ProviderUpdate) =>
+    request<Provider>(`/providers/${id}`, { method: "PATCH", body: JSON.stringify(updates) }),
+  addProviderAlias: (id: number, alias_texto: string) =>
+    request<{ id: number; alias_texto: string }>(`/providers/${id}/aliases`, {
+      method: "POST",
+      body: JSON.stringify({ alias_texto }),
+    }),
+  deleteProviderAlias: (aliasId: number) =>
+    request<{ eliminado: boolean }>(`/providers/aliases/${aliasId}`, { method: "DELETE" }),
+  mergeProviders: (targetId: number, otherProviderId: number) =>
+    request<{ facturas_reasignadas: number; alias_reasignados: number; presupuestos_reasignados: number }>(
+      `/providers/${targetId}/merge`,
+      { method: "POST", body: JSON.stringify({ other_provider_id: otherProviderId }) }
+    ),
+};
+
+export type Provider = {
+  id: number;
+  nombre_normalizado: string;
+  razon_social: string | null;
+  cuit: string | null;
+  categoria_principal_id: number | null;
+  categoria_principal_nombre: string | null;
+  moneda_habitual: string | null;
+  condiciones_comerciales: string | null;
+  observaciones: string | null;
+  aliases: { id: number; alias_texto: string }[];
+  cantidad_facturas: number;
+};
+
+export type ProviderUpdate = {
+  nombre_normalizado?: string;
+  razon_social?: string;
+  cuit?: string;
+  categoria_principal_id?: number;
+  moneda_habitual?: string;
+  condiciones_comerciales?: string;
+  observaciones?: string;
 };
 
 export type CatalogItem = { id: number; nombre: string };

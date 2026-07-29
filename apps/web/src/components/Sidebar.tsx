@@ -6,9 +6,8 @@ import { useAuth } from "@/lib/auth-context";
 
 const NAV_ITEMS = [
   { href: "/imports", label: "Importaciones" },
+  { href: "/proveedores", label: "Proveedores" },
   // Los siguientes se habilitan en proximas etapas del proyecto:
-  // { href: "/facturas", label: "Facturas" },
-  // { href: "/proveedores", label: "Proveedores" },
   // { href: "/presupuesto", label: "Presupuesto" },
   // { href: "/reportes", label: "Reportes" },
 ];
