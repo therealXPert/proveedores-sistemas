@@ -120,6 +120,118 @@ export const api = {
       `/providers/${targetId}/merge`,
       { method: "POST", body: JSON.stringify({ other_provider_id: otherProviderId }) }
     ),
+
+  // --- Categorias ---
+  listCategoriesAdmin: () => request<Category[]>("/admin/categories"),
+  createCategory: (payload: CategoryUpdate & { nombre: string }) =>
+    request<Category>("/admin/categories", { method: "POST", body: JSON.stringify(payload) }),
+  updateCategory: (id: number, payload: CategoryUpdate) =>
+    request<Category>(`/admin/categories/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  deactivateCategory: (id: number) =>
+    request<{ desactivada: boolean }>(`/admin/categories/${id}`, { method: "DELETE" }),
+
+  // --- Areas ---
+  listAreasAdmin: () => request<AreaAdmin[]>("/admin/areas"),
+  createArea: (nombre_normalizado: string) =>
+    request<AreaAdmin>("/admin/areas", { method: "POST", body: JSON.stringify({ nombre_normalizado }) }),
+  updateArea: (id: number, nombre_normalizado: string) =>
+    request<AreaAdmin>(`/admin/areas/${id}`, { method: "PATCH", body: JSON.stringify({ nombre_normalizado }) }),
+  deactivateArea: (id: number) =>
+    request<{ desactivada: boolean }>(`/admin/areas/${id}`, { method: "DELETE" }),
+  addAreaAlias: (id: number, alias_texto: string) =>
+    request<{ id: number; alias_texto: string }>(`/admin/areas/${id}/aliases`, {
+      method: "POST",
+      body: JSON.stringify({ alias_texto }),
+    }),
+  deleteAreaAlias: (aliasId: number) =>
+    request<{ eliminado: boolean }>(`/admin/areas/aliases/${aliasId}`, { method: "DELETE" }),
+
+  // --- Presupuesto ---
+  listBudgets: (anio: number) => request<BudgetItem[]>(`/budgets?anio=${anio}`),
+  createBudget: (payload: BudgetCreate) =>
+    request<BudgetItem>("/budgets", { method: "POST", body: JSON.stringify(payload) }),
+  updateBudget: (id: number, payload: BudgetUpdatePayload) =>
+    request<BudgetItem>(`/budgets/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  deleteBudget: (id: number) => request<{ eliminado: boolean }>(`/budgets/${id}`, { method: "DELETE" }),
+  budgetResumen: (anio: number) => request<BudgetResumenItem[]>(`/budgets/resumen?anio=${anio}`),
+};
+
+export type Category = {
+  id: number;
+  nombre: string;
+  codigo_erp: string | null;
+  categoria_padre_id: number | null;
+  categoria_padre_nombre: string | null;
+  is_active: boolean;
+};
+
+export type CategoryUpdate = {
+  nombre?: string;
+  codigo_erp?: string;
+  categoria_padre_id?: number;
+};
+
+export type AreaAdmin = {
+  id: number;
+  nombre_normalizado: string;
+  is_active: boolean;
+  aliases: { id: number; alias_texto: string }[];
+  cantidad_facturas: number;
+};
+
+export type BudgetItem = {
+  id: number;
+  anio: number;
+  mes: number | null;
+  provider_id: number | null;
+  provider_nombre: string | null;
+  area_id: number | null;
+  area_nombre: string | null;
+  category_id: number | null;
+  category_nombre: string | null;
+  cost_center_id: number | null;
+  cost_center_nombre: string | null;
+  business_unit_id: number | null;
+  business_unit_nombre: string | null;
+  moneda: string;
+  periodicidad_original: string | null;
+  importe_original: number | null;
+  importe_mensual_equivalente: number | null;
+  comentario: string | null;
+};
+
+export type BudgetCreate = {
+  anio: number;
+  mes?: number;
+  provider_id?: number;
+  area_id?: number;
+  category_id?: number;
+  cost_center_id?: number;
+  business_unit_id?: number;
+  moneda?: string;
+  periodicidad_original?: string;
+  importe_original?: number;
+  comentario?: string;
+};
+
+export type BudgetUpdatePayload = {
+  provider_id?: number;
+  area_id?: number;
+  category_id?: number;
+  cost_center_id?: number;
+  business_unit_id?: number;
+  periodicidad_original?: string;
+  importe_original?: number;
+  comentario?: string;
+};
+
+export type BudgetResumenItem = {
+  provider_id: number;
+  provider_nombre: string;
+  presupuesto_mensual: number;
+  gasto_real_promedio_mensual: number;
+  gasto_real_total: number;
+  desvio_mensual: number;
 };
 
 export type Provider = {
