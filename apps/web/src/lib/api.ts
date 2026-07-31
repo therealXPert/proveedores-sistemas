@@ -154,6 +154,83 @@ export const api = {
     request<BudgetItem>(`/budgets/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   deleteBudget: (id: number) => request<{ eliminado: boolean }>(`/budgets/${id}`, { method: "DELETE" }),
   budgetResumen: (anio: number) => request<BudgetResumenItem[]>(`/budgets/resumen?anio=${anio}`),
+
+  // --- Dashboard y reportes ---
+  dashboard: (anio?: number, mes?: number) => {
+    const params = new URLSearchParams();
+    if (anio) params.set("anio", String(anio));
+    if (mes) params.set("mes", String(mes));
+    const qs = params.toString();
+    return request<DashboardKPIs>(`/dashboard${qs ? `?${qs}` : ""}`);
+  },
+  evolucionMensual: (anio: number) => request<{ mes: number; gasto: number }[]>(`/reports/evolucion-mensual?anio=${anio}`),
+  rankingProveedores: (anio: number, mes?: number) =>
+    request<RankingItem[]>(`/reports/por-proveedor?anio=${anio}${mes ? `&mes=${mes}` : ""}`),
+  rankingCategorias: (anio: number, mes?: number) =>
+    request<RankingItem[]>(`/reports/por-categoria?anio=${anio}${mes ? `&mes=${mes}` : ""}`),
+  rankingAreas: (anio: number, mes?: number) =>
+    request<RankingItem[]>(`/reports/por-area?anio=${anio}${mes ? `&mes=${mes}` : ""}`),
+  listInvoices: (filtros: InvoiceFilters) => {
+    const params = new URLSearchParams();
+    Object.entries(filtros).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== "") params.set(k, String(v));
+    });
+    return request<InvoiceItem[]>(`/invoices?${params.toString()}`);
+  },
+};
+
+export type DashboardKPIs = {
+  anio: number;
+  mes: number;
+  gasto_total_mes: number;
+  gasto_acumulado_anio: number;
+  presupuesto_mensual: number;
+  presupuesto_anual: number;
+  porcentaje_consumido_mes: number | null;
+  desvio_contra_presupuesto_mes: number;
+  proyeccion_cierre_anio: number | null;
+  variacion_mes_anterior_pct: number | null;
+  variacion_interanual_pct: number | null;
+  cantidad_facturas_mes: number;
+  cantidad_proveedores_mes: number;
+  importaciones_pendientes: number;
+  registros_con_error: number;
+};
+
+export type RankingItem = {
+  provider_id?: number;
+  category_id?: number;
+  area_id?: number;
+  nombre: string;
+  monto: number;
+  participacion_pct: number;
+  acumulado_pct: number;
+};
+
+export type InvoiceFilters = {
+  anio?: number;
+  mes?: number;
+  provider_id?: number;
+  area_id?: number;
+  category_id?: number;
+  moneda?: string;
+  limit?: number;
+};
+
+export type InvoiceItem = {
+  id: number;
+  numero_factura: string | null;
+  tipo_documento: string;
+  fecha_emision: string;
+  provider_nombre: string | null;
+  area_nombre: string | null;
+  category_nombre: string | null;
+  importe_total: number;
+  moneda: string;
+  descripcion: string | null;
+  usuario_aprobador_nombre: string | null;
+  import_batch_id: number | null;
+  link_documento_original: string | null;
 };
 
 export type Category = {

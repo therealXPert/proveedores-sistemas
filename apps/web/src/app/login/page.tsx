@@ -19,7 +19,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await login(email, password);
-      router.push("/imports");
+      router.push("/dashboard");
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         setError("Email o contraseña incorrectos.");

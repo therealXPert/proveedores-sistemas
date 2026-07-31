@@ -5,13 +5,13 @@ import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 
 const NAV_ITEMS = [
+  { href: "/dashboard", label: "Dashboard" },
   { href: "/imports", label: "Importaciones" },
+  { href: "/reportes", label: "Reportes" },
+  { href: "/presupuesto", label: "Presupuesto" },
   { href: "/proveedores", label: "Proveedores" },
   { href: "/categorias", label: "Categorías" },
   { href: "/areas", label: "Áreas" },
-  { href: "/presupuesto", label: "Presupuesto" },
-  // Se habilita en una proxima etapa:
-  // { href: "/reportes", label: "Reportes" },
 ];
 
 export default function Sidebar() {
