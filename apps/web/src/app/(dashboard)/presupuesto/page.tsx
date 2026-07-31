@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, BudgetItem, BudgetResumenItem, CatalogItem, ApiError } from "@/lib/api";
+import { api, BudgetItem, BudgetResumenItem, CatalogItem, ApiError, downloadFile } from "@/lib/api";
 
 function formatMonto(n: number) {
   return n.toLocaleString("es-AR", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
@@ -69,6 +69,15 @@ export default function PresupuestoPage() {
     }
   }
 
+  async function handleExportResumen(formato: "csv" | "xlsx") {
+    setError(null);
+    try {
+      await downloadFile(`/budgets/resumen/export?formato=${formato}&anio=${anio}`, `presupuesto-vs-real.${formato}`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo exportar.");
+    }
+  }
+
   if (!budgets || !resumen) return <div className="muted">Cargando...</div>;
 
   const totalPresupuestado = resumen.reduce((acc, r) => acc + r.presupuesto_mensual, 0);
@@ -88,13 +97,20 @@ export default function PresupuestoPage() {
         <Metric label="Proveedores presupuestados" value={String(resumen.length)} />
       </div>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center" }}>
         <button className={`btn ${vista === "resumen" ? "btn-primary" : ""}`} onClick={() => setVista("resumen")}>
           Resumen por proveedor
         </button>
         <button className={`btn ${vista === "lineas" ? "btn-primary" : ""}`} onClick={() => setVista("lineas")}>
           Líneas de presupuesto ({budgets.length})
         </button>
+        {vista === "resumen" && (
+          <>
+            <div style={{ flex: 1 }} />
+            <button className="btn" onClick={() => handleExportResumen("csv")}>Exportar CSV</button>
+            <button className="btn" onClick={() => handleExportResumen("xlsx")}>Exportar Excel</button>
+          </>
+        )}
       </div>
 
       {vista === "resumen" && (

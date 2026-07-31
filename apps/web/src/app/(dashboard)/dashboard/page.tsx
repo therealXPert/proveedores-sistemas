@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
-import { api, DashboardKPIs, RankingItem, ApiError } from "@/lib/api";
+import { api, DashboardKPIs, RankingItem, ApiError, downloadFile } from "@/lib/api";
 
 const MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
 const COLORS = ["#e0a339", "#5b8fb0", "#4f9d6e", "#d9636f", "#8fa0ac", "#7a5a24"];
@@ -23,6 +23,23 @@ export default function DashboardPage() {
   const [porProveedor, setPorProveedor] = useState<RankingItem[] | null>(null);
   const [porArea, setPorArea] = useState<RankingItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [exportando, setExportando] = useState(false);
+
+  async function handleExportPdf() {
+    if (!kpis) return;
+    setExportando(true);
+    setError(null);
+    try {
+      await downloadFile(
+        `/dashboard/export-pdf?anio=${kpis.anio}&mes=${kpis.mes}`,
+        `informe-ejecutivo-${kpis.anio}-${kpis.mes}.pdf`
+      );
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo generar el informe.");
+    } finally {
+      setExportando(false);
+    }
+  }
 
   useEffect(() => {
     (async () => {
@@ -50,10 +67,17 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <div className="eyebrow" style={{ marginBottom: 6 }}>
-        Sistemas · {MESES[kpis.mes - 1]} {kpis.anio}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 24 }}>
+        <div>
+          <div className="eyebrow" style={{ marginBottom: 6 }}>
+            Sistemas · {MESES[kpis.mes - 1]} {kpis.anio}
+          </div>
+          <h1 className="h1">Dashboard ejecutivo</h1>
+        </div>
+        <button className="btn" onClick={handleExportPdf} disabled={exportando}>
+          {exportando ? "Generando..." : "Descargar informe PDF"}
+        </button>
       </div>
-      <h1 className="h1" style={{ marginBottom: 24 }}>Dashboard ejecutivo</h1>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 28 }}>
         <KpiCard label="Gasto del mes" value={formatMonto(kpis.gasto_total_mes)} sub={<>vs. mes anterior <Pct value={kpis.variacion_mes_anterior_pct} /></>} />

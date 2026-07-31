@@ -10,8 +10,10 @@ comparar versiones entre si. Documentado en docs/decisiones-arquitectura.md.
 """
 from datetime import datetime
 from decimal import Decimal
+import io
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -23,6 +25,7 @@ from app.models.invoicing import Invoice
 from app.models.audit import AuditEvent
 from app.schemas.budget import BudgetOut, BudgetCreate, BudgetUpdate, BudgetResumenItem
 from app.services.budget_import_service import _periodicidad_a_mensual
+from app.services import export_service as ex
 
 router = APIRouter(prefix="/budgets", tags=["budgets"])
 
@@ -167,13 +170,7 @@ def delete_budget(
     return {"eliminado": True}
 
 
-@router.get("/resumen", response_model=list[BudgetResumenItem])
-def resumen(
-    anio: int = 2026,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Compara el presupuesto mensual contra el gasto real acumulado, por proveedor."""
+def _resumen_data(db: Session, anio: int) -> list[dict]:
     presupuestos = db.query(Budget).filter(Budget.anio == anio, Budget.provider_id.isnot(None)).all()
 
     por_proveedor: dict[int, Decimal] = {}
@@ -193,8 +190,6 @@ def resumen(
             Invoice.moneda.in_(["Pesos", "ARS"]),
         ).all()
 
-        # Decimal(0) como start explicito: sum() de una lista vacia devuelve int 0 por
-        # default, y eso rompe la resta contra presupuesto_mensual (que es Decimal) mas abajo.
         gasto_real_total = sum((inv.importe_total or Decimal(0) for inv in invoices), Decimal(0))
         meses_con_gasto = {(inv.fecha_emision.year, inv.fecha_emision.month) for inv in invoices if inv.fecha_emision}
         cantidad_meses = len(meses_con_gasto) or 1
@@ -211,3 +206,39 @@ def resumen(
 
     resultado.sort(key=lambda r: -abs(r["desvio_mensual"]))
     return resultado
+
+
+@router.get("/resumen", response_model=list[BudgetResumenItem])
+def resumen(
+    anio: int = 2026,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Compara el presupuesto mensual contra el gasto real acumulado, por proveedor."""
+    return _resumen_data(db, anio)
+
+
+@router.get("/resumen/export")
+def export_resumen(
+    formato: str = Query(..., pattern="^(csv|xlsx)$"),
+    anio: int = 2026,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Exporta el resumen presupuesto vs. gasto real (sección 15 del diseño)."""
+    data = _resumen_data(db, anio)
+
+    if formato == "csv":
+        contenido = ex.budget_resumen_to_csv(data)
+        media_type = "text/csv"
+        nombre = f"presupuesto-vs-real-{anio}.csv"
+    else:
+        contenido = ex.budget_resumen_to_xlsx(data)
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        nombre = f"presupuesto-vs-real-{anio}.xlsx"
+
+    return StreamingResponse(
+        io.BytesIO(contenido),
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
+    )

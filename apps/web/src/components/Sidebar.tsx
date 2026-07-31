@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { href: "/proveedores", label: "Proveedores" },
   { href: "/categorias", label: "Categorías" },
   { href: "/areas", label: "Áreas" },
+  { href: "/auditoria", label: "Auditoría" },
 ];
 
 export default function Sidebar() {

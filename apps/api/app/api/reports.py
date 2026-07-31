@@ -1,5 +1,8 @@
 """Dashboard ejecutivo y reportes (secciones 11 y 12 del diseño)."""
+import io
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -16,6 +19,7 @@ from app.schemas.reports import (
     InvoiceListItem,
 )
 from app.services import reporting_service as rs
+from app.services import export_service as ex
 
 router = APIRouter(tags=["reports"])
 
@@ -73,18 +77,7 @@ def por_area(
     return rs.ranking_por_area(db, anio, mes)
 
 
-@router.get("/invoices", response_model=list[InvoiceListItem])
-def list_invoices(
-    anio: int | None = None,
-    mes: int | None = None,
-    provider_id: int | None = None,
-    area_id: int | None = None,
-    category_id: int | None = None,
-    moneda: str | None = None,
-    limit: int = Query(200, le=1000),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
+def _invoice_filtered_query(db: Session, anio, mes, provider_id, area_id, category_id, moneda):
     from sqlalchemy import func
 
     q = db.query(Invoice).filter(Invoice.estado == "aprobado")
@@ -100,44 +93,10 @@ def list_invoices(
         q = q.filter(Invoice.category_id == category_id)
     if moneda:
         q = q.filter(Invoice.moneda == moneda)
-
-    rows = q.order_by(Invoice.fecha_emision.desc()).limit(limit).all()
-
-    resultado = []
-    for inv in rows:
-        provider = db.query(Provider).filter(Provider.id == inv.provider_id).first() if inv.provider_id else None
-        area = db.query(Area).filter(Area.id == inv.area_id).first() if inv.area_id else None
-        category = db.query(ExpenseCategory).filter(ExpenseCategory.id == inv.category_id).first() if inv.category_id else None
-        aprobador = db.query(User).filter(User.id == inv.usuario_aprobador_id).first() if inv.usuario_aprobador_id else None
-
-        resultado.append({
-            "id": inv.id,
-            "numero_factura": inv.numero_factura,
-            "tipo_documento": inv.tipo_documento,
-            "fecha_emision": inv.fecha_emision.isoformat() if inv.fecha_emision else "",
-            "provider_nombre": provider.nombre_normalizado if provider else None,
-            "area_nombre": area.nombre_normalizado if area else None,
-            "category_nombre": category.nombre if category else None,
-            "importe_total": float(inv.importe_total or 0),
-            "moneda": inv.moneda,
-            "descripcion": inv.descripcion,
-            "usuario_aprobador_nombre": aprobador.nombre if aprobador else None,
-            "import_batch_id": inv.import_batch_id,
-            "link_documento_original": inv.link_documento_original,
-        })
-    return resultado
+    return q.order_by(Invoice.fecha_emision.desc())
 
 
-@router.get("/invoices/{invoice_id}", response_model=InvoiceListItem)
-def get_invoice(
-    invoice_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
-    if not inv:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Factura no encontrada")
-
+def _invoice_to_dict(db: Session, inv: Invoice) -> dict:
     provider = db.query(Provider).filter(Provider.id == inv.provider_id).first() if inv.provider_id else None
     area = db.query(Area).filter(Area.id == inv.area_id).first() if inv.area_id else None
     category = db.query(ExpenseCategory).filter(ExpenseCategory.id == inv.category_id).first() if inv.category_id else None
@@ -158,3 +117,87 @@ def get_invoice(
         "import_batch_id": inv.import_batch_id,
         "link_documento_original": inv.link_documento_original,
     }
+
+
+@router.get("/invoices", response_model=list[InvoiceListItem])
+def list_invoices(
+    anio: int | None = None,
+    mes: int | None = None,
+    provider_id: int | None = None,
+    area_id: int | None = None,
+    category_id: int | None = None,
+    moneda: str | None = None,
+    limit: int = Query(200, le=1000),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rows = _invoice_filtered_query(db, anio, mes, provider_id, area_id, category_id, moneda).limit(limit).all()
+    return [_invoice_to_dict(db, inv) for inv in rows]
+
+
+@router.get("/invoices/export")
+def export_invoices(
+    formato: str = Query(..., pattern="^(csv|xlsx)$"),
+    anio: int | None = None,
+    mes: int | None = None,
+    provider_id: int | None = None,
+    area_id: int | None = None,
+    category_id: int | None = None,
+    moneda: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Exporta el detalle de facturas respetando los mismos filtros de la pantalla (sección 15 del diseño)."""
+    rows = _invoice_filtered_query(db, anio, mes, provider_id, area_id, category_id, moneda).limit(5000).all()
+    data = [_invoice_to_dict(db, inv) for inv in rows]
+
+    if formato == "csv":
+        contenido = ex.invoices_to_csv(data)
+        media_type = "text/csv"
+        nombre = "facturas.csv"
+    else:
+        contenido = ex.invoices_to_xlsx(data)
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        nombre = "facturas.xlsx"
+
+    return StreamingResponse(
+        io.BytesIO(contenido),
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
+    )
+
+
+@router.get("/dashboard/export-pdf")
+def export_dashboard_pdf(
+    anio: int | None = None,
+    mes: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Informe ejecutivo en PDF (sección 15 del diseño)."""
+    if anio is None or mes is None:
+        anio_def, mes_def = rs.default_periodo(db)
+        anio = anio or anio_def
+        mes = mes or mes_def
+
+    kpis = rs.dashboard_kpis(db, anio, mes)
+    top_proveedores = rs.ranking_por_proveedor(db, anio, mes)
+    contenido = ex.dashboard_to_pdf(kpis, top_proveedores)
+
+    return StreamingResponse(
+        io.BytesIO(contenido),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="informe-ejecutivo-{anio}-{mes:02d}.pdf"'},
+    )
+
+
+@router.get("/invoices/{invoice_id}", response_model=InvoiceListItem)
+def get_invoice(
+    invoice_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+    if not inv:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Factura no encontrada")
+    return _invoice_to_dict(db, inv)

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, RankingItem, InvoiceItem, CatalogItem, ApiError } from "@/lib/api";
+import { api, RankingItem, InvoiceItem, CatalogItem, ApiError, downloadFile } from "@/lib/api";
 
 function formatMonto(n: number) {
   return n.toLocaleString("es-AR", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
@@ -49,6 +49,18 @@ export default function ReportesPage() {
       setInvoices(data);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudieron cargar las facturas.");
+    }
+  }
+
+  async function handleExport(formato: "csv" | "xlsx") {
+    setError(null);
+    try {
+      const params = new URLSearchParams({ formato, anio: String(anio) });
+      if (filtroMes) params.set("mes", filtroMes);
+      if (filtroProveedor) params.set("provider_id", filtroProveedor);
+      await downloadFile(`/invoices/export?${params.toString()}`, `facturas.${formato}`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo exportar.");
     }
   }
 
@@ -155,6 +167,9 @@ export default function ReportesPage() {
               ))}
             </select>
             <button className="btn btn-primary" onClick={loadInvoices}>Filtrar</button>
+            <div style={{ flex: 1 }} />
+            <button className="btn" onClick={() => handleExport("csv")}>Exportar CSV</button>
+            <button className="btn" onClick={() => handleExport("xlsx")}>Exportar Excel</button>
           </div>
 
           <div className="card">

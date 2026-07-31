@@ -13,6 +13,30 @@ function getToken(): string | null {
   return localStorage.getItem("access_token");
 }
 
+export async function downloadFile(path: string, filenameFallback: string): Promise<void> {
+  const token = getToken();
+  const res = await fetch(`${API_URL}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    throw new ApiError("No se pudo generar la descarga.", res.status);
+  }
+  const blob = await res.blob();
+
+  const disposition = res.headers.get("Content-Disposition");
+  const match = disposition?.match(/filename="?([^"]+)"?/);
+  const filename = match ? match[1] : filenameFallback;
+
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -177,6 +201,32 @@ export const api = {
     });
     return request<InvoiceItem[]>(`/invoices?${params.toString()}`);
   },
+
+  // --- Auditoria ---
+  listAuditEvents: (filtros: { accion?: string; entidad?: string; limit?: number }) => {
+    const params = new URLSearchParams();
+    Object.entries(filtros).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== "") params.set(k, String(v));
+    });
+    return request<AuditEvent[]>(`/audit?${params.toString()}`);
+  },
+  listAuditAcciones: () => request<string[]>("/audit/acciones"),
+  listAuditEntidades: () => request<string[]>("/audit/entidades"),
+};
+
+export type AuditEvent = {
+  id: number;
+  fecha: string;
+  usuario_nombre: string | null;
+  usuario_email: string | null;
+  accion: string;
+  entidad: string;
+  entidad_id: number | null;
+  valor_anterior: Record<string, unknown> | null;
+  valor_nuevo: Record<string, unknown> | null;
+  motivo: string | null;
+  ip_address: string | null;
+  import_batch_id: number | null;
 };
 
 export type DashboardKPIs = {
