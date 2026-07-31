@@ -1,5 +1,6 @@
-"""Dashboard ejecutivo y reportes (secciones 11 y 12 del diseño)."""
+"""Dashboard ejecutivo y reportes (secciones 11 y 12 del diseño). Trabaja sobre un rango de fechas libre."""
 import io
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
@@ -24,67 +25,75 @@ from app.services import export_service as ex
 router = APIRouter(tags=["reports"])
 
 
+def _resolver_rango(db: Session, fecha_desde: date | None, fecha_hasta: date | None) -> tuple[date, date]:
+    if fecha_desde and fecha_hasta:
+        if fecha_desde > fecha_hasta:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="fecha_desde no puede ser posterior a fecha_hasta")
+        return fecha_desde, fecha_hasta
+    return rs.default_rango(db)
+
+
 @router.get("/dashboard", response_model=DashboardKPIs)
 def dashboard(
-    anio: int | None = None,
-    mes: int | None = None,
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if anio is None or mes is None:
-        anio_def, mes_def = rs.default_periodo(db)
-        anio = anio or anio_def
-        mes = mes or mes_def
-    return rs.dashboard_kpis(db, anio, mes)
+    desde, hasta = _resolver_rango(db, fecha_desde, fecha_hasta)
+    return rs.dashboard_kpis(db, desde, hasta)
 
 
 @router.get("/reports/evolucion-mensual", response_model=list[EvolucionMensualItem])
 def evolucion_mensual(
-    anio: int = Query(...),
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return rs.evolucion_mensual(db, anio)
+    desde, hasta = _resolver_rango(db, fecha_desde, fecha_hasta)
+    return rs.evolucion_mensual(db, desde, hasta)
 
 
 @router.get("/reports/por-proveedor", response_model=list[RankingProveedorItem])
 def por_proveedor(
-    anio: int = Query(...),
-    mes: int | None = None,
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return rs.ranking_por_proveedor(db, anio, mes)
+    desde, hasta = _resolver_rango(db, fecha_desde, fecha_hasta)
+    return rs.ranking_por_proveedor(db, desde, hasta)
 
 
 @router.get("/reports/por-categoria", response_model=list[RankingCategoriaItem])
 def por_categoria(
-    anio: int = Query(...),
-    mes: int | None = None,
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return rs.ranking_por_categoria(db, anio, mes)
+    desde, hasta = _resolver_rango(db, fecha_desde, fecha_hasta)
+    return rs.ranking_por_categoria(db, desde, hasta)
 
 
 @router.get("/reports/por-area", response_model=list[RankingAreaItem])
 def por_area(
-    anio: int = Query(...),
-    mes: int | None = None,
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return rs.ranking_por_area(db, anio, mes)
+    desde, hasta = _resolver_rango(db, fecha_desde, fecha_hasta)
+    return rs.ranking_por_area(db, desde, hasta)
 
 
-def _invoice_filtered_query(db: Session, anio, mes, provider_id, area_id, category_id, moneda):
-    from sqlalchemy import func
-
+def _invoice_filtered_query(db: Session, fecha_desde, fecha_hasta, provider_id, area_id, category_id, moneda):
     q = db.query(Invoice).filter(Invoice.estado == "aprobado")
-    if anio:
-        q = q.filter(func.extract("year", Invoice.fecha_emision) == anio)
-    if mes:
-        q = q.filter(func.extract("month", Invoice.fecha_emision) == mes)
+    if fecha_desde:
+        q = q.filter(Invoice.fecha_emision >= fecha_desde)
+    if fecha_hasta:
+        q = q.filter(Invoice.fecha_emision <= datetime.combine(fecha_hasta, datetime.max.time()))
     if provider_id:
         q = q.filter(Invoice.provider_id == provider_id)
     if area_id:
@@ -121,8 +130,8 @@ def _invoice_to_dict(db: Session, inv: Invoice) -> dict:
 
 @router.get("/invoices", response_model=list[InvoiceListItem])
 def list_invoices(
-    anio: int | None = None,
-    mes: int | None = None,
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
     provider_id: int | None = None,
     area_id: int | None = None,
     category_id: int | None = None,
@@ -131,15 +140,15 @@ def list_invoices(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    rows = _invoice_filtered_query(db, anio, mes, provider_id, area_id, category_id, moneda).limit(limit).all()
+    rows = _invoice_filtered_query(db, fecha_desde, fecha_hasta, provider_id, area_id, category_id, moneda).limit(limit).all()
     return [_invoice_to_dict(db, inv) for inv in rows]
 
 
 @router.get("/invoices/export")
 def export_invoices(
     formato: str = Query(..., pattern="^(csv|xlsx)$"),
-    anio: int | None = None,
-    mes: int | None = None,
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
     provider_id: int | None = None,
     area_id: int | None = None,
     category_id: int | None = None,
@@ -148,7 +157,7 @@ def export_invoices(
     current_user: User = Depends(get_current_user),
 ):
     """Exporta el detalle de facturas respetando los mismos filtros de la pantalla (sección 15 del diseño)."""
-    rows = _invoice_filtered_query(db, anio, mes, provider_id, area_id, category_id, moneda).limit(5000).all()
+    rows = _invoice_filtered_query(db, fecha_desde, fecha_hasta, provider_id, area_id, category_id, moneda).limit(5000).all()
     data = [_invoice_to_dict(db, inv) for inv in rows]
 
     if formato == "csv":
@@ -169,25 +178,22 @@ def export_invoices(
 
 @router.get("/dashboard/export-pdf")
 def export_dashboard_pdf(
-    anio: int | None = None,
-    mes: int | None = None,
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Informe ejecutivo en PDF (sección 15 del diseño)."""
-    if anio is None or mes is None:
-        anio_def, mes_def = rs.default_periodo(db)
-        anio = anio or anio_def
-        mes = mes or mes_def
+    desde, hasta = _resolver_rango(db, fecha_desde, fecha_hasta)
 
-    kpis = rs.dashboard_kpis(db, anio, mes)
-    top_proveedores = rs.ranking_por_proveedor(db, anio, mes)
+    kpis = rs.dashboard_kpis(db, desde, hasta)
+    top_proveedores = rs.ranking_por_proveedor(db, desde, hasta)
     contenido = ex.dashboard_to_pdf(kpis, top_proveedores)
 
     return StreamingResponse(
         io.BytesIO(contenido),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="informe-ejecutivo-{anio}-{mes:02d}.pdf"'},
+        headers={"Content-Disposition": f'attachment; filename="informe-ejecutivo-{desde.isoformat()}_a_{hasta.isoformat()}.pdf"'},
     )
 
 

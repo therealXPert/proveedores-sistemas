@@ -50,3 +50,38 @@ def test_gasto_neto_resta_notas_de_credito():
 
 def test_gasto_neto_lista_vacia_es_cero():
     assert gasto_neto([]) == Decimal("0")
+
+
+def test_periodo_anterior_equivalente_mismo_largo_en_dias():
+    from datetime import date
+    from app.services.reporting_service import _periodo_anterior_equivalente
+
+    fecha_desde, fecha_hasta = date(2026, 7, 1), date(2026, 7, 31)
+    anterior_desde, anterior_hasta = _periodo_anterior_equivalente(fecha_desde, fecha_hasta)
+
+    # El periodo anterior termina justo un dia antes de que empiece el elegido
+    assert anterior_hasta == date(2026, 6, 30)
+    # Y tiene exactamente la misma cantidad de dias (31), aunque no coincida
+    # con un mes calendario exacto (junio tiene 30 dias, julio 31)
+    dias_periodo = (fecha_hasta - fecha_desde).days + 1
+    dias_anterior = (anterior_hasta - anterior_desde).days + 1
+    assert dias_periodo == dias_anterior == 31
+
+
+def test_periodo_anterior_equivalente_semestre():
+    from datetime import date
+    from app.services.reporting_service import _periodo_anterior_equivalente
+
+    anterior_desde, anterior_hasta = _periodo_anterior_equivalente(date(2026, 1, 1), date(2026, 6, 30))
+    assert anterior_hasta == date(2025, 12, 31)
+    # mismo largo en dias (181)
+    assert (date(2026, 6, 30) - date(2026, 1, 1)).days == (anterior_hasta - anterior_desde).days
+
+
+def test_evolucion_mensual_cruza_anios(db_session):
+    from datetime import date
+    from app.services.reporting_service import evolucion_mensual
+
+    resultado = evolucion_mensual(db_session, date(2025, 12, 1), date(2026, 2, 28))
+    periodos = [(r["anio"], r["mes"]) for r in resultado]
+    assert periodos == [(2025, 12), (2026, 1), (2026, 2)]

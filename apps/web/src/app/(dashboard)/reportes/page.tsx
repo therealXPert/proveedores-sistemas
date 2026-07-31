@@ -2,49 +2,57 @@
 
 import { useEffect, useState } from "react";
 import { api, RankingItem, InvoiceItem, CatalogItem, ApiError, downloadFile } from "@/lib/api";
+import DateRangePicker, { Rango } from "@/components/DateRangePicker";
 
 function formatMonto(n: number) {
   return n.toLocaleString("es-AR", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
+
+function formatFechaCorta(iso: string) {
+  return new Date(iso + "T00:00:00").toLocaleDateString("es-AR", { day: "2-digit", month: "short", year: "numeric" });
 }
 
 type Vista = "concentracion" | "por-area" | "facturas";
 
 export default function ReportesPage() {
   const [vista, setVista] = useState<Vista>("concentracion");
-  const [anio] = useState(2026);
+  const [rango, setRango] = useState<Rango | null>(null);
 
   const [proveedores, setProveedores] = useState<RankingItem[] | null>(null);
   const [areas, setAreas] = useState<RankingItem[] | null>(null);
   const [invoices, setInvoices] = useState<InvoiceItem[] | null>(null);
   const [providersCatalog, setProvidersCatalog] = useState<CatalogItem[]>([]);
 
-  const [filtroMes, setFiltroMes] = useState("");
   const [filtroProveedor, setFiltroProveedor] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     api.listProviders().then(setProvidersCatalog).catch(() => {});
+    // Usamos el mismo periodo por defecto que el Dashboard (ultimo mes con datos)
+    api.dashboard().then((k) => setRango({ desde: k.fecha_desde, hasta: k.fecha_hasta })).catch(() => {});
   }, []);
 
   useEffect(() => {
+    if (!rango) return;
     setError(null);
     if (vista === "concentracion") {
-      api.rankingProveedores(anio).then(setProveedores).catch((e) => setError(e instanceof ApiError ? e.message : "Error"));
+      api.rankingProveedores(rango.desde, rango.hasta).then(setProveedores).catch((e) => setError(e instanceof ApiError ? e.message : "Error"));
     } else if (vista === "por-area") {
-      api.rankingAreas(anio).then(setAreas).catch((e) => setError(e instanceof ApiError ? e.message : "Error"));
+      api.rankingAreas(rango.desde, rango.hasta).then(setAreas).catch((e) => setError(e instanceof ApiError ? e.message : "Error"));
     } else {
       loadInvoices();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vista]);
+  }, [vista, rango?.desde, rango?.hasta]);
 
   async function loadInvoices() {
+    if (!rango) return;
     try {
       const data = await api.listInvoices({
-        anio,
-        mes: filtroMes ? Number(filtroMes) : undefined,
+        fecha_desde: rango.desde,
+        fecha_hasta: rango.hasta,
         provider_id: filtroProveedor ? Number(filtroProveedor) : undefined,
-        limit: 200,
+        limit: 500,
       });
       setInvoices(data);
     } catch (err) {
@@ -53,12 +61,12 @@ export default function ReportesPage() {
   }
 
   async function handleExport(formato: "csv" | "xlsx") {
+    if (!rango) return;
     setError(null);
     try {
-      const params = new URLSearchParams({ formato, anio: String(anio) });
-      if (filtroMes) params.set("mes", filtroMes);
+      const params = new URLSearchParams({ formato, fecha_desde: rango.desde, fecha_hasta: rango.hasta });
       if (filtroProveedor) params.set("provider_id", filtroProveedor);
-      await downloadFile(`/invoices/export?${params.toString()}`, `facturas.${formato}`);
+      await downloadFile(`/invoices/export?${params.toString()}`, `facturas-${rango.desde}_a_${rango.hasta}.${formato}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo exportar.");
     }
@@ -66,8 +74,16 @@ export default function ReportesPage() {
 
   return (
     <div>
-      <div className="eyebrow" style={{ marginBottom: 6 }}>Sistemas · {anio}</div>
+      <div className="eyebrow" style={{ marginBottom: 6 }}>
+        Sistemas {rango && `· ${formatFechaCorta(rango.desde)} — ${formatFechaCorta(rango.hasta)}`}
+      </div>
       <h1 className="h1" style={{ marginBottom: 20 }}>Reportes</h1>
+
+      {rango && (
+        <div style={{ marginBottom: 20 }}>
+          <DateRangePicker value={rango} onChange={setRango} referencia={new Date(rango.hasta + "T00:00:00")} />
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
         <button className={`btn ${vista === "concentracion" ? "btn-primary" : ""}`} onClick={() => setVista("concentracion")}>
@@ -110,6 +126,9 @@ export default function ReportesPage() {
                     </td>
                   </tr>
                 ))}
+                {proveedores.length === 0 && (
+                  <tr><td colSpan={5} className="muted" style={{ textAlign: "center", padding: 20 }}>Sin facturas en este período.</td></tr>
+                )}
               </tbody>
             </table>
           )}
@@ -137,6 +156,9 @@ export default function ReportesPage() {
                     <td className="mono" style={{ textAlign: "right" }}>{a.participacion_pct.toFixed(1)}%</td>
                   </tr>
                 ))}
+                {areas.length === 0 && (
+                  <tr><td colSpan={3} className="muted" style={{ textAlign: "center", padding: 20 }}>Sin facturas en este período.</td></tr>
+                )}
               </tbody>
             </table>
           )}
@@ -146,16 +168,6 @@ export default function ReportesPage() {
       {vista === "facturas" && (
         <div>
           <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-            <select
-              value={filtroMes}
-              onChange={(e) => setFiltroMes(e.target.value)}
-              style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "8px 11px", color: "var(--text)" }}
-            >
-              <option value="">Todos los meses</option>
-              {["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"].map((m, i) => (
-                <option key={i} value={i + 1}>{m}</option>
-              ))}
-            </select>
             <select
               value={filtroProveedor}
               onChange={(e) => setFiltroProveedor(e.target.value)}

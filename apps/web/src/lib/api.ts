@@ -179,21 +179,24 @@ export const api = {
   deleteBudget: (id: number) => request<{ eliminado: boolean }>(`/budgets/${id}`, { method: "DELETE" }),
   budgetResumen: (anio: number) => request<BudgetResumenItem[]>(`/budgets/resumen?anio=${anio}`),
 
-  // --- Dashboard y reportes ---
-  dashboard: (anio?: number, mes?: number) => {
+  // --- Dashboard y reportes: rango de fechas libre (YYYY-MM-DD) ---
+  dashboard: (fechaDesde?: string, fechaHasta?: string) => {
     const params = new URLSearchParams();
-    if (anio) params.set("anio", String(anio));
-    if (mes) params.set("mes", String(mes));
+    if (fechaDesde) params.set("fecha_desde", fechaDesde);
+    if (fechaHasta) params.set("fecha_hasta", fechaHasta);
     const qs = params.toString();
     return request<DashboardKPIs>(`/dashboard${qs ? `?${qs}` : ""}`);
   },
-  evolucionMensual: (anio: number) => request<{ mes: number; gasto: number }[]>(`/reports/evolucion-mensual?anio=${anio}`),
-  rankingProveedores: (anio: number, mes?: number) =>
-    request<RankingItem[]>(`/reports/por-proveedor?anio=${anio}${mes ? `&mes=${mes}` : ""}`),
-  rankingCategorias: (anio: number, mes?: number) =>
-    request<RankingItem[]>(`/reports/por-categoria?anio=${anio}${mes ? `&mes=${mes}` : ""}`),
-  rankingAreas: (anio: number, mes?: number) =>
-    request<RankingItem[]>(`/reports/por-area?anio=${anio}${mes ? `&mes=${mes}` : ""}`),
+  evolucionMensual: (fechaDesde: string, fechaHasta: string) =>
+    request<{ anio: number; mes: number; gasto: number }[]>(
+      `/reports/evolucion-mensual?fecha_desde=${fechaDesde}&fecha_hasta=${fechaHasta}`
+    ),
+  rankingProveedores: (fechaDesde: string, fechaHasta: string) =>
+    request<RankingItem[]>(`/reports/por-proveedor?fecha_desde=${fechaDesde}&fecha_hasta=${fechaHasta}`),
+  rankingCategorias: (fechaDesde: string, fechaHasta: string) =>
+    request<RankingItem[]>(`/reports/por-categoria?fecha_desde=${fechaDesde}&fecha_hasta=${fechaHasta}`),
+  rankingAreas: (fechaDesde: string, fechaHasta: string) =>
+    request<RankingItem[]>(`/reports/por-area?fecha_desde=${fechaDesde}&fecha_hasta=${fechaHasta}`),
   listInvoices: (filtros: InvoiceFilters) => {
     const params = new URLSearchParams();
     Object.entries(filtros).forEach(([k, v]) => {
@@ -230,19 +233,16 @@ export type AuditEvent = {
 };
 
 export type DashboardKPIs = {
-  anio: number;
-  mes: number;
-  gasto_total_mes: number;
-  gasto_acumulado_anio: number;
-  presupuesto_mensual: number;
-  presupuesto_anual: number;
-  porcentaje_consumido_mes: number | null;
-  desvio_contra_presupuesto_mes: number;
-  proyeccion_cierre_anio: number | null;
-  variacion_mes_anterior_pct: number | null;
-  variacion_interanual_pct: number | null;
-  cantidad_facturas_mes: number;
-  cantidad_proveedores_mes: number;
+  fecha_desde: string;
+  fecha_hasta: string;
+  dias: number;
+  gasto_total_periodo: number;
+  presupuesto_periodo: number;
+  porcentaje_consumido: number | null;
+  desvio_contra_presupuesto: number;
+  variacion_vs_periodo_anterior_pct: number | null;
+  cantidad_facturas: number;
+  cantidad_proveedores: number;
   importaciones_pendientes: number;
   registros_con_error: number;
 };
@@ -258,8 +258,8 @@ export type RankingItem = {
 };
 
 export type InvoiceFilters = {
-  anio?: number;
-  mes?: number;
+  fecha_desde?: string;
+  fecha_hasta?: string;
   provider_id?: number;
   area_id?: number;
   category_id?: number;

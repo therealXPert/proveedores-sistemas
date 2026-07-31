@@ -4,24 +4,22 @@ from pydantic import BaseModel
 
 
 class DashboardKPIs(BaseModel):
-    anio: int
-    mes: int
-    gasto_total_mes: float
-    gasto_acumulado_anio: float
-    presupuesto_mensual: float
-    presupuesto_anual: float
-    porcentaje_consumido_mes: Optional[float] = None
-    desvio_contra_presupuesto_mes: float
-    proyeccion_cierre_anio: Optional[float] = None
-    variacion_mes_anterior_pct: Optional[float] = None
-    variacion_interanual_pct: Optional[float] = None
-    cantidad_facturas_mes: int
-    cantidad_proveedores_mes: int
+    fecha_desde: str
+    fecha_hasta: str
+    dias: int
+    gasto_total_periodo: float
+    presupuesto_periodo: float
+    porcentaje_consumido: Optional[float] = None
+    desvio_contra_presupuesto: float
+    variacion_vs_periodo_anterior_pct: Optional[float] = None
+    cantidad_facturas: int
+    cantidad_proveedores: int
     importaciones_pendientes: int
     registros_con_error: int
 
 
 class EvolucionMensualItem(BaseModel):
+    anio: int
     mes: int
     gasto: float
 

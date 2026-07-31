@@ -99,13 +99,13 @@ class InformeEjecutivoPDF(FPDF):
 
 
 def dashboard_to_pdf(kpis: dict, top_proveedores: list[dict]) -> bytes:
-    meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio",
-             "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
-
     pdf = InformeEjecutivoPDF()
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 8, f"Período: {meses[kpis['mes'] - 1]} {kpis['anio']}", ln=True)
+
+    desde_fmt = datetime.fromisoformat(kpis["fecha_desde"]).strftime("%d/%m/%Y")
+    hasta_fmt = datetime.fromisoformat(kpis["fecha_hasta"]).strftime("%d/%m/%Y")
+    pdf.cell(0, 8, f"Período: {desde_fmt} al {hasta_fmt} ({kpis['dias']} días)", ln=True)
     pdf.cell(0, 6, f"Generado: {datetime.now().strftime('%d/%m/%Y %H:%M')}", ln=True)
     pdf.ln(4)
 
@@ -114,16 +114,13 @@ def dashboard_to_pdf(kpis: dict, top_proveedores: list[dict]) -> bytes:
     pdf.set_font("Helvetica", "", 10)
 
     filas = [
-        ("Gasto del mes", f"$ {_fmt_monto(kpis['gasto_total_mes'])}"),
-        ("Gasto acumulado del año", f"$ {_fmt_monto(kpis['gasto_acumulado_anio'])}"),
-        ("Presupuesto mensual", f"$ {_fmt_monto(kpis['presupuesto_mensual'])}"),
-        ("Presupuesto anual", f"$ {_fmt_monto(kpis['presupuesto_anual'])}"),
-        ("% presupuesto consumido", f"{kpis['porcentaje_consumido_mes']:.1f}%" if kpis["porcentaje_consumido_mes"] is not None else "-"),
-        ("Desvío contra presupuesto (mes)", f"$ {_fmt_monto(kpis['desvio_contra_presupuesto_mes'])}"),
-        ("Proyección de cierre del año", f"$ {_fmt_monto(kpis['proyeccion_cierre_anio'])}" if kpis["proyeccion_cierre_anio"] is not None else "-"),
-        ("Variación vs. mes anterior", f"{kpis['variacion_mes_anterior_pct']:.1f}%" if kpis["variacion_mes_anterior_pct"] is not None else "-"),
-        ("Cantidad de facturas del mes", str(kpis["cantidad_facturas_mes"])),
-        ("Cantidad de proveedores del mes", str(kpis["cantidad_proveedores_mes"])),
+        ("Gasto del período", f"$ {_fmt_monto(kpis['gasto_total_periodo'])}"),
+        ("Presupuesto del período (prorrateado)", f"$ {_fmt_monto(kpis['presupuesto_periodo'])}"),
+        ("% presupuesto consumido", f"{kpis['porcentaje_consumido']:.1f}%" if kpis["porcentaje_consumido"] is not None else "-"),
+        ("Desvío contra presupuesto", f"$ {_fmt_monto(kpis['desvio_contra_presupuesto'])}"),
+        ("Variación vs. período anterior equivalente", f"{kpis['variacion_vs_periodo_anterior_pct']:.1f}%" if kpis["variacion_vs_periodo_anterior_pct"] is not None else "-"),
+        ("Cantidad de facturas", str(kpis["cantidad_facturas"])),
+        ("Cantidad de proveedores", str(kpis["cantidad_proveedores"])),
     ]
     for etiqueta, valor in filas:
         pdf.cell(90, 7, etiqueta, border=0)

@@ -1,6 +1,10 @@
 """
 Calculos de reportes y dashboard (secciones 11 y 12 del diseño).
 
+Trabaja sobre un RANGO DE FECHAS libre (fecha_desde/fecha_hasta), no solo
+"año/mes fijo" -- para poder pedir un mes especifico, un semestre, un año
+completo, o cualquier corte parcial una vez que se carguen historicos.
+
 Regla de signo (addendum #15 del documento de diseño): al sumar gasto,
 Factura y Factura de Credito Pyme suman, Nota de Credito resta, Nota de
 Debito suma -- asi el "gasto real" ya queda neto de devoluciones/ajustes.
@@ -9,10 +13,10 @@ Solo se consideran facturas en pesos (moneda in Pesos/ARS): es la moneda
 base decidida para el MVP: no hay conversion de USD sin una tabla de tipo
 de cambio (decision ya tomada: se elimino exchange_rates).
 """
-from datetime import datetime
+import calendar
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.invoicing import Invoice
@@ -22,21 +26,20 @@ from app.models.importing import ImportBatch, StagingInvoice
 
 MONEDAS_BASE = ("Pesos", "ARS")
 NOTAS_QUE_RESTAN = {"Nota Credito", "Nota de Credito"}
+DIAS_PROMEDIO_MES = Decimal("30.44")  # 365.25 / 12, para prorratear presupuesto mensual a cualquier rango
 
 
 def signo(tipo_documento: str | None) -> int:
     return -1 if (tipo_documento or "").strip() in NOTAS_QUE_RESTAN else 1
 
 
-def _invoices_query(db: Session, anio: int, mes: int | None = None):
-    q = db.query(Invoice).filter(
+def _invoices_query_rango(db: Session, fecha_desde: date, fecha_hasta: date):
+    return db.query(Invoice).filter(
         Invoice.estado == "aprobado",
         Invoice.moneda.in_(MONEDAS_BASE),
-        func.extract("year", Invoice.fecha_emision) == anio,
+        Invoice.fecha_emision >= fecha_desde,
+        Invoice.fecha_emision <= datetime.combine(fecha_hasta, datetime.max.time()),
     )
-    if mes:
-        q = q.filter(func.extract("month", Invoice.fecha_emision) == mes)
-    return q
 
 
 def gasto_neto(invoices: list[Invoice]) -> Decimal:
@@ -46,13 +49,17 @@ def gasto_neto(invoices: list[Invoice]) -> Decimal:
     return total
 
 
-def default_periodo(db: Session) -> tuple[int, int]:
-    """Ultimo mes con facturas aprobadas; si no hay ninguna, el mes actual."""
-    ultima_fecha = db.query(func.max(Invoice.fecha_emision)).filter(Invoice.estado == "aprobado").scalar()
-    if ultima_fecha:
-        return ultima_fecha.year, ultima_fecha.month
-    now = datetime.utcnow()
-    return now.year, now.month
+def default_rango(db: Session) -> tuple[date, date]:
+    """Por defecto: el ultimo mes calendario que tenga alguna factura aprobada."""
+    ultima_fecha = db.query(Invoice.fecha_emision).filter(Invoice.estado == "aprobado").order_by(Invoice.fecha_emision.desc()).first()
+    if ultima_fecha and ultima_fecha[0]:
+        ref = ultima_fecha[0].date()
+    else:
+        ref = datetime.utcnow().date()
+    desde = ref.replace(day=1)
+    ultimo_dia = calendar.monthrange(ref.year, ref.month)[1]
+    hasta = ref.replace(day=ultimo_dia)
+    return desde, hasta
 
 
 def presupuesto_mensual_total(db: Session, anio: int) -> Decimal:
@@ -60,75 +67,90 @@ def presupuesto_mensual_total(db: Session, anio: int) -> Decimal:
     return sum((b.importe_mensual_equivalente for b in rows), Decimal(0))
 
 
-def dashboard_kpis(db: Session, anio: int, mes: int) -> dict:
-    facturas_mes = _invoices_query(db, anio, mes).all()
-    gasto_mes = gasto_neto(facturas_mes)
+def presupuesto_prorrateado(db: Session, fecha_desde: date, fecha_hasta: date) -> Decimal:
+    """
+    El presupuesto se guarda como un valor MENSUAL (importe_mensual_equivalente).
+    Para compararlo contra un rango arbitrario (una semana, un semestre, un año),
+    se prorratea por cantidad de dias: dias_del_rango / 30.44 (promedio real de
+    dias por mes) * presupuesto mensual. Si el rango cruza más de un año
+    calendario, se promedia el presupuesto mensual total de cada año involucrado.
+    """
+    dias = (fecha_hasta - fecha_desde).days + 1
+    anios = list(range(fecha_desde.year, fecha_hasta.year + 1))
+    if not anios:
+        return Decimal(0)
+    totales_por_anio = [presupuesto_mensual_total(db, a) for a in anios]
+    promedio_mensual = sum(totales_por_anio, Decimal(0)) / len(anios)
+    return promedio_mensual * Decimal(dias) / DIAS_PROMEDIO_MES
 
-    facturas_anio_hasta_mes = db.query(Invoice).filter(
-        Invoice.estado == "aprobado",
-        Invoice.moneda.in_(MONEDAS_BASE),
-        func.extract("year", Invoice.fecha_emision) == anio,
-        func.extract("month", Invoice.fecha_emision) <= mes,
-    ).all()
-    gasto_acumulado_anio = gasto_neto(facturas_anio_hasta_mes)
 
-    presupuesto_mensual = presupuesto_mensual_total(db, anio)
-    presupuesto_anual = presupuesto_mensual * 12
+def _periodo_anterior_equivalente(fecha_desde: date, fecha_hasta: date) -> tuple[date, date]:
+    """El mismo largo de dias, inmediatamente antes del rango elegido."""
+    dias = (fecha_hasta - fecha_desde).days + 1
+    anterior_hasta = fecha_desde - timedelta(days=1)
+    anterior_desde = anterior_hasta - timedelta(days=dias - 1)
+    return anterior_desde, anterior_hasta
 
-    mes_anterior = 12 if mes == 1 else mes - 1
-    anio_mes_anterior = anio - 1 if mes == 1 else anio
-    facturas_mes_anterior = _invoices_query(db, anio_mes_anterior, mes_anterior).all()
-    gasto_mes_anterior = gasto_neto(facturas_mes_anterior)
-    variacion_mes_anterior_pct = (
-        float((gasto_mes - gasto_mes_anterior) / gasto_mes_anterior * 100) if gasto_mes_anterior else None
+
+def dashboard_kpis(db: Session, fecha_desde: date, fecha_hasta: date) -> dict:
+    facturas = _invoices_query_rango(db, fecha_desde, fecha_hasta).all()
+    gasto_total = gasto_neto(facturas)
+
+    anterior_desde, anterior_hasta = _periodo_anterior_equivalente(fecha_desde, fecha_hasta)
+    facturas_anterior = _invoices_query_rango(db, anterior_desde, anterior_hasta).all()
+    gasto_anterior = gasto_neto(facturas_anterior)
+    variacion_pct = (
+        float((gasto_total - gasto_anterior) / gasto_anterior * 100) if gasto_anterior else None
     )
 
-    facturas_mismo_mes_anio_anterior = _invoices_query(db, anio - 1, mes).all()
-    gasto_mismo_mes_anio_anterior = gasto_neto(facturas_mismo_mes_anio_anterior)
-    variacion_interanual_pct = (
-        float((gasto_mes - gasto_mismo_mes_anio_anterior) / gasto_mismo_mes_anio_anterior * 100)
-        if gasto_mismo_mes_anio_anterior else None
-    )
+    presupuesto_periodo = presupuesto_prorrateado(db, fecha_desde, fecha_hasta)
 
-    proyeccion_cierre_anio = float(gasto_acumulado_anio / mes * 12) if mes else None
-
-    cantidad_proveedores = len({f.provider_id for f in facturas_mes if f.provider_id})
-    importaciones_pendientes = db.query(func.count(ImportBatch.id)).filter(
+    cantidad_proveedores = len({f.provider_id for f in facturas if f.provider_id})
+    importaciones_pendientes = db.query(ImportBatch).filter(
         ImportBatch.estado.in_(["pendiente_validacion", "con_errores"])
-    ).scalar()
-    registros_con_error = db.query(func.count(StagingInvoice.id)).filter(
+    ).count()
+    registros_con_error = db.query(StagingInvoice).filter(
         StagingInvoice.estado_fila == "error", StagingInvoice.resultado == "pendiente"
-    ).scalar()
+    ).count()
+
+    dias = (fecha_hasta - fecha_desde).days + 1
 
     return {
-        "anio": anio,
-        "mes": mes,
-        "gasto_total_mes": float(gasto_mes),
-        "gasto_acumulado_anio": float(gasto_acumulado_anio),
-        "presupuesto_mensual": float(presupuesto_mensual),
-        "presupuesto_anual": float(presupuesto_anual),
-        "porcentaje_consumido_mes": float(gasto_mes / presupuesto_mensual * 100) if presupuesto_mensual else None,
-        "desvio_contra_presupuesto_mes": float(gasto_mes - presupuesto_mensual),
-        "proyeccion_cierre_anio": proyeccion_cierre_anio,
-        "variacion_mes_anterior_pct": variacion_mes_anterior_pct,
-        "variacion_interanual_pct": variacion_interanual_pct,
-        "cantidad_facturas_mes": len(facturas_mes),
-        "cantidad_proveedores_mes": cantidad_proveedores,
-        "importaciones_pendientes": importaciones_pendientes or 0,
-        "registros_con_error": registros_con_error or 0,
+        "fecha_desde": fecha_desde.isoformat(),
+        "fecha_hasta": fecha_hasta.isoformat(),
+        "dias": dias,
+        "gasto_total_periodo": float(gasto_total),
+        "presupuesto_periodo": float(presupuesto_periodo),
+        "porcentaje_consumido": float(gasto_total / presupuesto_periodo * 100) if presupuesto_periodo else None,
+        "desvio_contra_presupuesto": float(gasto_total - presupuesto_periodo),
+        "variacion_vs_periodo_anterior_pct": variacion_pct,
+        "cantidad_facturas": len(facturas),
+        "cantidad_proveedores": cantidad_proveedores,
+        "importaciones_pendientes": importaciones_pendientes,
+        "registros_con_error": registros_con_error,
     }
 
 
-def evolucion_mensual(db: Session, anio: int) -> list[dict]:
+def evolucion_mensual(db: Session, fecha_desde: date, fecha_hasta: date) -> list[dict]:
+    """Un punto por cada mes calendario que el rango toca (puede cruzar años)."""
     resultado = []
-    for mes in range(1, 13):
-        facturas = _invoices_query(db, anio, mes).all()
-        resultado.append({"mes": mes, "gasto": float(gasto_neto(facturas))})
+    cursor = fecha_desde.replace(day=1)
+    while cursor <= fecha_hasta:
+        ultimo_dia = calendar.monthrange(cursor.year, cursor.month)[1]
+        inicio_mes = max(cursor, fecha_desde)
+        fin_mes = min(cursor.replace(day=ultimo_dia), fecha_hasta)
+        facturas = _invoices_query_rango(db, inicio_mes, fin_mes).all()
+        resultado.append({"anio": cursor.year, "mes": cursor.month, "gasto": float(gasto_neto(facturas))})
+
+        if cursor.month == 12:
+            cursor = cursor.replace(year=cursor.year + 1, month=1)
+        else:
+            cursor = cursor.replace(month=cursor.month + 1)
     return resultado
 
 
-def _ranking_generico(db: Session, anio: int, mes: int | None, agrupar_por: str) -> list[dict]:
-    facturas = _invoices_query(db, anio, mes).all()
+def _ranking_generico(db: Session, fecha_desde: date, fecha_hasta: date, agrupar_por: str) -> list[dict]:
+    facturas = _invoices_query_rango(db, fecha_desde, fecha_hasta).all()
     totales: dict[int, Decimal] = {}
     for f in facturas:
         clave = getattr(f, agrupar_por)
@@ -152,8 +174,8 @@ def _ranking_generico(db: Session, anio: int, mes: int | None, agrupar_por: str)
     return resultado
 
 
-def ranking_por_proveedor(db: Session, anio: int, mes: int | None = None) -> list[dict]:
-    filas = _ranking_generico(db, anio, mes, "provider_id")
+def ranking_por_proveedor(db: Session, fecha_desde: date, fecha_hasta: date) -> list[dict]:
+    filas = _ranking_generico(db, fecha_desde, fecha_hasta, "provider_id")
     for f in filas:
         p = db.query(Provider).filter(Provider.id == f["id"]).first()
         f["nombre"] = p.nombre_normalizado if p else "?"
@@ -161,8 +183,8 @@ def ranking_por_proveedor(db: Session, anio: int, mes: int | None = None) -> lis
     return filas
 
 
-def ranking_por_categoria(db: Session, anio: int, mes: int | None = None) -> list[dict]:
-    filas = _ranking_generico(db, anio, mes, "category_id")
+def ranking_por_categoria(db: Session, fecha_desde: date, fecha_hasta: date) -> list[dict]:
+    filas = _ranking_generico(db, fecha_desde, fecha_hasta, "category_id")
     for f in filas:
         c = db.query(ExpenseCategory).filter(ExpenseCategory.id == f["id"]).first()
         f["nombre"] = c.nombre if c else "?"
@@ -170,8 +192,8 @@ def ranking_por_categoria(db: Session, anio: int, mes: int | None = None) -> lis
     return filas
 
 
-def ranking_por_area(db: Session, anio: int, mes: int | None = None) -> list[dict]:
-    filas = _ranking_generico(db, anio, mes, "area_id")
+def ranking_por_area(db: Session, fecha_desde: date, fecha_hasta: date) -> list[dict]:
+    filas = _ranking_generico(db, fecha_desde, fecha_hasta, "area_id")
     for f in filas:
         a = db.query(Area).filter(Area.id == f["id"]).first()
         f["nombre"] = a.nombre_normalizado if a else "?"
