@@ -37,58 +37,63 @@ def _resolver_rango(db: Session, fecha_desde: date | None, fecha_hasta: date | N
 def dashboard(
     fecha_desde: date | None = None,
     fecha_hasta: date | None = None,
+    economic_group_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     desde, hasta = _resolver_rango(db, fecha_desde, fecha_hasta)
-    return rs.dashboard_kpis(db, desde, hasta)
+    return rs.dashboard_kpis(db, desde, hasta, economic_group_id)
 
 
 @router.get("/reports/evolucion-mensual", response_model=list[EvolucionMensualItem])
 def evolucion_mensual(
     fecha_desde: date | None = None,
     fecha_hasta: date | None = None,
+    economic_group_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     desde, hasta = _resolver_rango(db, fecha_desde, fecha_hasta)
-    return rs.evolucion_mensual(db, desde, hasta)
+    return rs.evolucion_mensual(db, desde, hasta, economic_group_id)
 
 
 @router.get("/reports/por-proveedor", response_model=list[RankingProveedorItem])
 def por_proveedor(
     fecha_desde: date | None = None,
     fecha_hasta: date | None = None,
+    economic_group_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     desde, hasta = _resolver_rango(db, fecha_desde, fecha_hasta)
-    return rs.ranking_por_proveedor(db, desde, hasta)
+    return rs.ranking_por_proveedor(db, desde, hasta, economic_group_id)
 
 
 @router.get("/reports/por-categoria", response_model=list[RankingCategoriaItem])
 def por_categoria(
     fecha_desde: date | None = None,
     fecha_hasta: date | None = None,
+    economic_group_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     desde, hasta = _resolver_rango(db, fecha_desde, fecha_hasta)
-    return rs.ranking_por_categoria(db, desde, hasta)
+    return rs.ranking_por_categoria(db, desde, hasta, economic_group_id)
 
 
 @router.get("/reports/por-area", response_model=list[RankingAreaItem])
 def por_area(
     fecha_desde: date | None = None,
     fecha_hasta: date | None = None,
+    economic_group_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     desde, hasta = _resolver_rango(db, fecha_desde, fecha_hasta)
-    return rs.ranking_por_area(db, desde, hasta)
+    return rs.ranking_por_area(db, desde, hasta, economic_group_id)
 
 
-def _invoice_filtered_query(db: Session, fecha_desde, fecha_hasta, provider_id, area_id, category_id, moneda):
+def _invoice_filtered_query(db: Session, fecha_desde, fecha_hasta, provider_id, area_id, category_id, moneda, economic_group_id=None):
     q = db.query(Invoice).filter(Invoice.estado == "aprobado")
     if fecha_desde:
         q = q.filter(Invoice.fecha_emision >= fecha_desde)
@@ -102,6 +107,9 @@ def _invoice_filtered_query(db: Session, fecha_desde, fecha_hasta, provider_id, 
         q = q.filter(Invoice.category_id == category_id)
     if moneda:
         q = q.filter(Invoice.moneda == moneda)
+    if economic_group_id:
+        from app.models.catalog import Company
+        q = q.join(Company, Company.id == Invoice.company_id).filter(Company.economic_group_id == economic_group_id)
     return q.order_by(Invoice.fecha_emision.desc())
 
 
@@ -136,11 +144,12 @@ def list_invoices(
     area_id: int | None = None,
     category_id: int | None = None,
     moneda: str | None = None,
+    economic_group_id: int | None = None,
     limit: int = Query(200, le=1000),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    rows = _invoice_filtered_query(db, fecha_desde, fecha_hasta, provider_id, area_id, category_id, moneda).limit(limit).all()
+    rows = _invoice_filtered_query(db, fecha_desde, fecha_hasta, provider_id, area_id, category_id, moneda, economic_group_id).limit(limit).all()
     return [_invoice_to_dict(db, inv) for inv in rows]
 
 
@@ -153,11 +162,12 @@ def export_invoices(
     area_id: int | None = None,
     category_id: int | None = None,
     moneda: str | None = None,
+    economic_group_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Exporta el detalle de facturas respetando los mismos filtros de la pantalla (sección 15 del diseño)."""
-    rows = _invoice_filtered_query(db, fecha_desde, fecha_hasta, provider_id, area_id, category_id, moneda).limit(5000).all()
+    rows = _invoice_filtered_query(db, fecha_desde, fecha_hasta, provider_id, area_id, category_id, moneda, economic_group_id).limit(5000).all()
     data = [_invoice_to_dict(db, inv) for inv in rows]
 
     if formato == "csv":
@@ -180,14 +190,15 @@ def export_invoices(
 def export_dashboard_pdf(
     fecha_desde: date | None = None,
     fecha_hasta: date | None = None,
+    economic_group_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Informe ejecutivo en PDF (sección 15 del diseño)."""
     desde, hasta = _resolver_rango(db, fecha_desde, fecha_hasta)
 
-    kpis = rs.dashboard_kpis(db, desde, hasta)
-    top_proveedores = rs.ranking_por_proveedor(db, desde, hasta)
+    kpis = rs.dashboard_kpis(db, desde, hasta, economic_group_id)
+    top_proveedores = rs.ranking_por_proveedor(db, desde, hasta, economic_group_id)
     contenido = ex.dashboard_to_pdf(kpis, top_proveedores)
 
     return StreamingResponse(

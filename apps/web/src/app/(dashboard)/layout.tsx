@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { GroupProvider } from "@/lib/group-context";
 import Sidebar from "@/components/Sidebar";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -26,9 +27,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   if (!user) return null;
 
   return (
-    <div style={{ display: "flex" }}>
-      <Sidebar />
-      <main style={{ flex: 1, padding: "32px 40px", maxWidth: 1100 }}>{children}</main>
-    </div>
+    <GroupProvider>
+      <div style={{ display: "flex" }}>
+        <Sidebar />
+        <main style={{ flex: 1, padding: "32px 40px", maxWidth: 1100 }}>{children}</main>
+      </div>
+    </GroupProvider>
   );
 }

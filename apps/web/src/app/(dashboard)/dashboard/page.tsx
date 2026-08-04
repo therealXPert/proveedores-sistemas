@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { api, DashboardKPIs, RankingItem, ApiError, downloadFile } from "@/lib/api";
 import DateRangePicker, { Rango } from "@/components/DateRangePicker";
+import { useGroup } from "@/lib/group-context";
 
 const MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
 const COLORS = ["#e0a339", "#5b8fb0", "#4f9d6e", "#d9636f", "#8fa0ac", "#7a5a24"];
@@ -23,6 +24,7 @@ function Pct({ value }: { value: number | null }) {
 }
 
 export default function DashboardPage() {
+  const { activeGroupId, groups } = useGroup();
   const [rango, setRango] = useState<Rango | null>(null);
   const [kpis, setKpis] = useState<DashboardKPIs | null>(null);
   const [evolucion, setEvolucion] = useState<{ anio: number; mes: number; gasto: number }[] | null>(null);
@@ -52,10 +54,10 @@ export default function DashboardPage() {
     (async () => {
       try {
         const [k, evo, prov, area] = await Promise.all([
-          api.dashboard(rango.desde, rango.hasta),
-          api.evolucionMensual(rango.desde, rango.hasta),
-          api.rankingProveedores(rango.desde, rango.hasta),
-          api.rankingAreas(rango.desde, rango.hasta),
+          api.dashboard(rango.desde, rango.hasta, activeGroupId),
+          api.evolucionMensual(rango.desde, rango.hasta, activeGroupId),
+          api.rankingProveedores(rango.desde, rango.hasta, activeGroupId),
+          api.rankingAreas(rango.desde, rango.hasta, activeGroupId),
         ]);
         setKpis(k);
         setEvolucion(evo);
@@ -66,15 +68,17 @@ export default function DashboardPage() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rango?.desde, rango?.hasta]);
+  }, [rango?.desde, rango?.hasta, activeGroupId]);
 
   async function handleExportPdf() {
     if (!rango) return;
     setExportando(true);
     setError(null);
     try {
+      const params = new URLSearchParams({ fecha_desde: rango.desde, fecha_hasta: rango.hasta });
+      if (activeGroupId) params.set("economic_group_id", String(activeGroupId));
       await downloadFile(
-        `/dashboard/export-pdf?fecha_desde=${rango.desde}&fecha_hasta=${rango.hasta}`,
+        `/dashboard/export-pdf?${params.toString()}`,
         `informe-ejecutivo-${rango.desde}_a_${rango.hasta}.pdf`
       );
     } catch (err) {
@@ -97,7 +101,9 @@ export default function DashboardPage() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
         <div>
           <div className="eyebrow" style={{ marginBottom: 6 }}>
-            Sistemas · {formatFechaCorta(kpis.fecha_desde)} — {formatFechaCorta(kpis.fecha_hasta)} ({kpis.dias} días)
+            {(activeGroupId ? groups.find((g) => g.id === activeGroupId)?.nombre : "Todos los grupos") ?? "Sistemas"}
+            {" · "}
+            {formatFechaCorta(kpis.fecha_desde)} — {formatFechaCorta(kpis.fecha_hasta)} ({kpis.dias} días)
           </div>
           <h1 className="h1">Dashboard ejecutivo</h1>
         </div>

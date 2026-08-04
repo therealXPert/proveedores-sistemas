@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, RankingItem, InvoiceItem, CatalogItem, ApiError, downloadFile } from "@/lib/api";
 import DateRangePicker, { Rango } from "@/components/DateRangePicker";
+import { useGroup } from "@/lib/group-context";
 
 function formatMonto(n: number) {
   return n.toLocaleString("es-AR", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
@@ -15,6 +16,7 @@ function formatFechaCorta(iso: string) {
 type Vista = "concentracion" | "por-area" | "facturas";
 
 export default function ReportesPage() {
+  const { activeGroupId } = useGroup();
   const [vista, setVista] = useState<Vista>("concentracion");
   const [rango, setRango] = useState<Rango | null>(null);
 
@@ -36,14 +38,14 @@ export default function ReportesPage() {
     if (!rango) return;
     setError(null);
     if (vista === "concentracion") {
-      api.rankingProveedores(rango.desde, rango.hasta).then(setProveedores).catch((e) => setError(e instanceof ApiError ? e.message : "Error"));
+      api.rankingProveedores(rango.desde, rango.hasta, activeGroupId).then(setProveedores).catch((e) => setError(e instanceof ApiError ? e.message : "Error"));
     } else if (vista === "por-area") {
-      api.rankingAreas(rango.desde, rango.hasta).then(setAreas).catch((e) => setError(e instanceof ApiError ? e.message : "Error"));
+      api.rankingAreas(rango.desde, rango.hasta, activeGroupId).then(setAreas).catch((e) => setError(e instanceof ApiError ? e.message : "Error"));
     } else {
       loadInvoices();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vista, rango?.desde, rango?.hasta]);
+  }, [vista, rango?.desde, rango?.hasta, activeGroupId]);
 
   async function loadInvoices() {
     if (!rango) return;
@@ -52,6 +54,7 @@ export default function ReportesPage() {
         fecha_desde: rango.desde,
         fecha_hasta: rango.hasta,
         provider_id: filtroProveedor ? Number(filtroProveedor) : undefined,
+        economic_group_id: activeGroupId ?? undefined,
         limit: 500,
       });
       setInvoices(data);
@@ -66,6 +69,7 @@ export default function ReportesPage() {
     try {
       const params = new URLSearchParams({ formato, fecha_desde: rango.desde, fecha_hasta: rango.hasta });
       if (filtroProveedor) params.set("provider_id", filtroProveedor);
+      if (activeGroupId) params.set("economic_group_id", String(activeGroupId));
       await downloadFile(`/invoices/export?${params.toString()}`, `facturas-${rango.desde}_a_${rango.hasta}.${formato}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo exportar.");

@@ -179,24 +179,35 @@ export const api = {
   deleteBudget: (id: number) => request<{ eliminado: boolean }>(`/budgets/${id}`, { method: "DELETE" }),
   budgetResumen: (anio: number) => request<BudgetResumenItem[]>(`/budgets/resumen?anio=${anio}`),
 
-  // --- Dashboard y reportes: rango de fechas libre (YYYY-MM-DD) ---
-  dashboard: (fechaDesde?: string, fechaHasta?: string) => {
+  // --- Dashboard y reportes: rango de fechas libre (YYYY-MM-DD) + grupo economico opcional ---
+  dashboard: (fechaDesde?: string, fechaHasta?: string, economicGroupId?: number | null) => {
     const params = new URLSearchParams();
     if (fechaDesde) params.set("fecha_desde", fechaDesde);
     if (fechaHasta) params.set("fecha_hasta", fechaHasta);
+    if (economicGroupId) params.set("economic_group_id", String(economicGroupId));
     const qs = params.toString();
     return request<DashboardKPIs>(`/dashboard${qs ? `?${qs}` : ""}`);
   },
-  evolucionMensual: (fechaDesde: string, fechaHasta: string) =>
-    request<{ anio: number; mes: number; gasto: number }[]>(
-      `/reports/evolucion-mensual?fecha_desde=${fechaDesde}&fecha_hasta=${fechaHasta}`
-    ),
-  rankingProveedores: (fechaDesde: string, fechaHasta: string) =>
-    request<RankingItem[]>(`/reports/por-proveedor?fecha_desde=${fechaDesde}&fecha_hasta=${fechaHasta}`),
-  rankingCategorias: (fechaDesde: string, fechaHasta: string) =>
-    request<RankingItem[]>(`/reports/por-categoria?fecha_desde=${fechaDesde}&fecha_hasta=${fechaHasta}`),
-  rankingAreas: (fechaDesde: string, fechaHasta: string) =>
-    request<RankingItem[]>(`/reports/por-area?fecha_desde=${fechaDesde}&fecha_hasta=${fechaHasta}`),
+  evolucionMensual: (fechaDesde: string, fechaHasta: string, economicGroupId?: number | null) => {
+    const params = new URLSearchParams({ fecha_desde: fechaDesde, fecha_hasta: fechaHasta });
+    if (economicGroupId) params.set("economic_group_id", String(economicGroupId));
+    return request<{ anio: number; mes: number; gasto: number }[]>(`/reports/evolucion-mensual?${params.toString()}`);
+  },
+  rankingProveedores: (fechaDesde: string, fechaHasta: string, economicGroupId?: number | null) => {
+    const params = new URLSearchParams({ fecha_desde: fechaDesde, fecha_hasta: fechaHasta });
+    if (economicGroupId) params.set("economic_group_id", String(economicGroupId));
+    return request<RankingItem[]>(`/reports/por-proveedor?${params.toString()}`);
+  },
+  rankingCategorias: (fechaDesde: string, fechaHasta: string, economicGroupId?: number | null) => {
+    const params = new URLSearchParams({ fecha_desde: fechaDesde, fecha_hasta: fechaHasta });
+    if (economicGroupId) params.set("economic_group_id", String(economicGroupId));
+    return request<RankingItem[]>(`/reports/por-categoria?${params.toString()}`);
+  },
+  rankingAreas: (fechaDesde: string, fechaHasta: string, economicGroupId?: number | null) => {
+    const params = new URLSearchParams({ fecha_desde: fechaDesde, fecha_hasta: fechaHasta });
+    if (economicGroupId) params.set("economic_group_id", String(economicGroupId));
+    return request<RankingItem[]>(`/reports/por-area?${params.toString()}`);
+  },
   listInvoices: (filtros: InvoiceFilters) => {
     const params = new URLSearchParams();
     Object.entries(filtros).forEach(([k, v]) => {
@@ -215,6 +226,36 @@ export const api = {
   },
   listAuditAcciones: () => request<string[]>("/audit/acciones"),
   listAuditEntidades: () => request<string[]>("/audit/entidades"),
+
+  // --- Grupos economicos ---
+  listEconomicGroups: () => request<EconomicGroup[]>("/economic-groups"),
+  createEconomicGroup: (nombre: string) =>
+    request<EconomicGroup>("/economic-groups", { method: "POST", body: JSON.stringify({ nombre }) }),
+  updateEconomicGroup: (id: number, nombre: string) =>
+    request<EconomicGroup>(`/economic-groups/${id}`, { method: "PATCH", body: JSON.stringify({ nombre }) }),
+  deactivateEconomicGroup: (id: number) =>
+    request<{ desactivado: boolean }>(`/economic-groups/${id}`, { method: "DELETE" }),
+  listCompaniesAdmin: () => request<CompanyItem[]>("/companies"),
+  assignCompanyGroup: (companyId: number, economicGroupId: number | null) =>
+    request<CompanyItem>(`/companies/${companyId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ economic_group_id: economicGroupId }),
+    }),
+};
+
+export type EconomicGroup = {
+  id: number;
+  nombre: string;
+  is_active: boolean;
+  cantidad_empresas: number;
+};
+
+export type CompanyItem = {
+  id: number;
+  nombre: string;
+  economic_group_id: number | null;
+  economic_group_nombre: string | null;
+  cantidad_facturas: number;
 };
 
 export type AuditEvent = {
@@ -264,6 +305,7 @@ export type InvoiceFilters = {
   area_id?: number;
   category_id?: number;
   moneda?: string;
+  economic_group_id?: number;
   limit?: number;
 };
 

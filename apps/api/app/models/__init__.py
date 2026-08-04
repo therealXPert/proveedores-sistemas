@@ -13,6 +13,7 @@ from app.models.catalog import (  # noqa: F401
     BusinessUnit,
     Company,
     Branch,
+    EconomicGroup,
     Project,
 )
 from app.models.importing import (  # noqa: F401

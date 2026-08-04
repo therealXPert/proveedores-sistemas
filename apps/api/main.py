@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
-from app.api import health, auth, imports, catalogs, providers, categories, areas, budgets, reports, audit
+from app.api import health, auth, imports, catalogs, providers, categories, areas, budgets, reports, audit, economic_groups
 
 app = FastAPI(title=settings.app_name)
 
@@ -24,6 +24,7 @@ app.include_router(areas.router)
 app.include_router(budgets.router)
 app.include_router(reports.router)
 app.include_router(audit.router)
+app.include_router(economic_groups.router)
 
 
 @app.get("/")

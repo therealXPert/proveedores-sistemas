@@ -98,12 +98,25 @@ class BusinessUnit(Base, TimestampMixin, SoftDeleteMixin):
     nombre = Column(String(150), nullable=False, unique=True)
 
 
+class EconomicGroup(Base, TimestampMixin, SoftDeleteMixin):
+    """
+    Grupo economico (ej. Autocity, Grupo Tagle, Nuevos Negocios): agrupa varias
+    Empresas/razones sociales bajo un mismo "set de datos" para poder filtrar
+    el dashboard y los reportes por grupo activo.
+    """
+    __tablename__ = "economic_groups"
+
+    id = Column(Integer, primary_key=True)
+    nombre = Column(String(150), nullable=False, unique=True)
+
+
 class Company(Base, TimestampMixin, SoftDeleteMixin):
     """Empresa/razon social del grupo que factura el gasto (columna 'Empresa' del CSV: TAGLE, NIX, MOTCOR, etc.)."""
     __tablename__ = "companies"
 
     id = Column(Integer, primary_key=True)
     nombre = Column(String(150), nullable=False, unique=True)
+    economic_group_id = Column(Integer, ForeignKey("economic_groups.id"), nullable=True)
 
 
 class Branch(Base, TimestampMixin, SoftDeleteMixin):

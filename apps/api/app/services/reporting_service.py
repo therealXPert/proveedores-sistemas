@@ -20,7 +20,7 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from app.models.invoicing import Invoice
-from app.models.catalog import Provider, ExpenseCategory, Area
+from app.models.catalog import Provider, ExpenseCategory, Area, Company
 from app.models.budget import Budget
 from app.models.importing import ImportBatch, StagingInvoice
 
@@ -33,13 +33,16 @@ def signo(tipo_documento: str | None) -> int:
     return -1 if (tipo_documento or "").strip() in NOTAS_QUE_RESTAN else 1
 
 
-def _invoices_query_rango(db: Session, fecha_desde: date, fecha_hasta: date):
-    return db.query(Invoice).filter(
+def _invoices_query_rango(db: Session, fecha_desde: date, fecha_hasta: date, economic_group_id: int | None = None):
+    q = db.query(Invoice).filter(
         Invoice.estado == "aprobado",
         Invoice.moneda.in_(MONEDAS_BASE),
         Invoice.fecha_emision >= fecha_desde,
         Invoice.fecha_emision <= datetime.combine(fecha_hasta, datetime.max.time()),
     )
+    if economic_group_id:
+        q = q.join(Company, Company.id == Invoice.company_id).filter(Company.economic_group_id == economic_group_id)
+    return q
 
 
 def gasto_neto(invoices: list[Invoice]) -> Decimal:
@@ -92,12 +95,12 @@ def _periodo_anterior_equivalente(fecha_desde: date, fecha_hasta: date) -> tuple
     return anterior_desde, anterior_hasta
 
 
-def dashboard_kpis(db: Session, fecha_desde: date, fecha_hasta: date) -> dict:
-    facturas = _invoices_query_rango(db, fecha_desde, fecha_hasta).all()
+def dashboard_kpis(db: Session, fecha_desde: date, fecha_hasta: date, economic_group_id: int | None = None) -> dict:
+    facturas = _invoices_query_rango(db, fecha_desde, fecha_hasta, economic_group_id).all()
     gasto_total = gasto_neto(facturas)
 
     anterior_desde, anterior_hasta = _periodo_anterior_equivalente(fecha_desde, fecha_hasta)
-    facturas_anterior = _invoices_query_rango(db, anterior_desde, anterior_hasta).all()
+    facturas_anterior = _invoices_query_rango(db, anterior_desde, anterior_hasta, economic_group_id).all()
     gasto_anterior = gasto_neto(facturas_anterior)
     variacion_pct = (
         float((gasto_total - gasto_anterior) / gasto_anterior * 100) if gasto_anterior else None
@@ -131,7 +134,7 @@ def dashboard_kpis(db: Session, fecha_desde: date, fecha_hasta: date) -> dict:
     }
 
 
-def evolucion_mensual(db: Session, fecha_desde: date, fecha_hasta: date) -> list[dict]:
+def evolucion_mensual(db: Session, fecha_desde: date, fecha_hasta: date, economic_group_id: int | None = None) -> list[dict]:
     """Un punto por cada mes calendario que el rango toca (puede cruzar años)."""
     resultado = []
     cursor = fecha_desde.replace(day=1)
@@ -139,7 +142,7 @@ def evolucion_mensual(db: Session, fecha_desde: date, fecha_hasta: date) -> list
         ultimo_dia = calendar.monthrange(cursor.year, cursor.month)[1]
         inicio_mes = max(cursor, fecha_desde)
         fin_mes = min(cursor.replace(day=ultimo_dia), fecha_hasta)
-        facturas = _invoices_query_rango(db, inicio_mes, fin_mes).all()
+        facturas = _invoices_query_rango(db, inicio_mes, fin_mes, economic_group_id).all()
         resultado.append({"anio": cursor.year, "mes": cursor.month, "gasto": float(gasto_neto(facturas))})
 
         if cursor.month == 12:
@@ -149,8 +152,8 @@ def evolucion_mensual(db: Session, fecha_desde: date, fecha_hasta: date) -> list
     return resultado
 
 
-def _ranking_generico(db: Session, fecha_desde: date, fecha_hasta: date, agrupar_por: str) -> list[dict]:
-    facturas = _invoices_query_rango(db, fecha_desde, fecha_hasta).all()
+def _ranking_generico(db: Session, fecha_desde: date, fecha_hasta: date, agrupar_por: str, economic_group_id: int | None = None) -> list[dict]:
+    facturas = _invoices_query_rango(db, fecha_desde, fecha_hasta, economic_group_id).all()
     totales: dict[int, Decimal] = {}
     for f in facturas:
         clave = getattr(f, agrupar_por)
@@ -174,8 +177,8 @@ def _ranking_generico(db: Session, fecha_desde: date, fecha_hasta: date, agrupar
     return resultado
 
 
-def ranking_por_proveedor(db: Session, fecha_desde: date, fecha_hasta: date) -> list[dict]:
-    filas = _ranking_generico(db, fecha_desde, fecha_hasta, "provider_id")
+def ranking_por_proveedor(db: Session, fecha_desde: date, fecha_hasta: date, economic_group_id: int | None = None) -> list[dict]:
+    filas = _ranking_generico(db, fecha_desde, fecha_hasta, "provider_id", economic_group_id)
     for f in filas:
         p = db.query(Provider).filter(Provider.id == f["id"]).first()
         f["nombre"] = p.nombre_normalizado if p else "?"
@@ -183,8 +186,8 @@ def ranking_por_proveedor(db: Session, fecha_desde: date, fecha_hasta: date) -> 
     return filas
 
 
-def ranking_por_categoria(db: Session, fecha_desde: date, fecha_hasta: date) -> list[dict]:
-    filas = _ranking_generico(db, fecha_desde, fecha_hasta, "category_id")
+def ranking_por_categoria(db: Session, fecha_desde: date, fecha_hasta: date, economic_group_id: int | None = None) -> list[dict]:
+    filas = _ranking_generico(db, fecha_desde, fecha_hasta, "category_id", economic_group_id)
     for f in filas:
         c = db.query(ExpenseCategory).filter(ExpenseCategory.id == f["id"]).first()
         f["nombre"] = c.nombre if c else "?"
@@ -192,8 +195,8 @@ def ranking_por_categoria(db: Session, fecha_desde: date, fecha_hasta: date) -> 
     return filas
 
 
-def ranking_por_area(db: Session, fecha_desde: date, fecha_hasta: date) -> list[dict]:
-    filas = _ranking_generico(db, fecha_desde, fecha_hasta, "area_id")
+def ranking_por_area(db: Session, fecha_desde: date, fecha_hasta: date, economic_group_id: int | None = None) -> list[dict]:
+    filas = _ranking_generico(db, fecha_desde, fecha_hasta, "area_id", economic_group_id)
     for f in filas:
         a = db.query(Area).filter(Area.id == f["id"]).first()
         f["nombre"] = a.nombre_normalizado if a else "?"

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { useGroup } from "@/lib/group-context";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard" },
@@ -12,12 +13,14 @@ const NAV_ITEMS = [
   { href: "/proveedores", label: "Proveedores" },
   { href: "/categorias", label: "Categorías" },
   { href: "/areas", label: "Áreas" },
+  { href: "/grupos-economicos", label: "Grupos Económicos" },
   { href: "/auditoria", label: "Auditoría" },
 ];
 
 export default function Sidebar() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
+  const { groups, activeGroupId, setActiveGroupId } = useGroup();
 
   return (
     <aside
@@ -33,11 +36,36 @@ export default function Sidebar() {
         top: 0,
       }}
     >
-      <div style={{ padding: "0 20px", marginBottom: 28 }}>
+      <div style={{ padding: "0 20px", marginBottom: 18 }}>
         <div className="eyebrow" style={{ marginBottom: 4 }}>
           Autocity · Sistemas
         </div>
         <div className="h2">Control de Gasto</div>
+      </div>
+
+      <div style={{ padding: "0 20px", marginBottom: 20 }}>
+        <label className="faint" style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", display: "block", marginBottom: 6 }}>
+          Grupo económico
+        </label>
+        <select
+          value={activeGroupId ?? ""}
+          onChange={(e) => setActiveGroupId(e.target.value ? Number(e.target.value) : null)}
+          style={{
+            width: "100%",
+            background: "var(--surface-raised)",
+            border: "1px solid var(--accent-dim)",
+            borderRadius: "var(--radius)",
+            padding: "7px 8px",
+            color: "var(--text)",
+            fontSize: 12.5,
+            fontWeight: 600,
+          }}
+        >
+          <option value="">Todos los grupos</option>
+          {groups.map((g) => (
+            <option key={g.id} value={g.id}>{g.nombre}</option>
+          ))}
+        </select>
       </div>
 
       <nav style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
