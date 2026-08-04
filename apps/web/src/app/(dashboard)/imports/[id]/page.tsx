@@ -6,6 +6,7 @@ import Link from "next/link";
 import { api, ImportBatch, StagingRow, StagingRowUpdate, CatalogItem, ApiError } from "@/lib/api";
 import StatusBadge from "@/components/StatusBadge";
 import EditStagingRowForm from "@/components/EditStagingRowForm";
+import { useGroup } from "@/lib/group-context";
 
 function formatMonto(value: unknown) {
   if (value === null || value === undefined || value === "") return "—";
@@ -22,6 +23,7 @@ type Catalogs = {
   businessUnits: CatalogItem[];
   companies: CatalogItem[];
   branches: CatalogItem[];
+  economicGroups: CatalogItem[];
 };
 
 const EMPTY_CATALOGS: Catalogs = {
@@ -32,6 +34,7 @@ const EMPTY_CATALOGS: Catalogs = {
   businessUnits: [],
   companies: [],
   branches: [],
+  economicGroups: [],
 };
 
 function nombreCatalogo(items: CatalogItem[], id: unknown): string {
@@ -43,6 +46,7 @@ function nombreCatalogo(items: CatalogItem[], id: unknown): string {
 export default function ImportDetailPage() {
   const params = useParams<{ id: string }>();
   const batchId = Number(params.id);
+  const { activeGroupId, groups } = useGroup();
 
   const [batch, setBatch] = useState<ImportBatch | null>(null);
   const [rows, setRows] = useState<StagingRow[] | null>(null);
@@ -51,11 +55,13 @@ export default function ImportDetailPage() {
   const [editingRow, setEditingRow] = useState<number | null>(null);
   const [rowActionLoading, setRowActionLoading] = useState<number | null>(null);
   const [bulkLoading, setBulkLoading] = useState(false);
+  const [assigningGroup, setAssigningGroup] = useState(false);
+  const [grupoParaAsignar, setGrupoParaAsignar] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   async function load() {
     try {
-      const [b, r] = await Promise.all([api.getImport(batchId), api.previewImport(batchId)]);
+      const [b, r] = await Promise.all([api.getImport(batchId), api.previewImport(batchId, activeGroupId)]);
       setBatch(b);
       setRows(r);
     } catch (err) {
@@ -74,7 +80,7 @@ export default function ImportDetailPage() {
         api.listCompanies(),
         api.listBranches(),
       ]);
-      setCatalogs({ providers, areas, categories, costCenters, businessUnits, companies, branches });
+      setCatalogs({ providers, areas, categories, costCenters, businessUnits, companies, branches, economicGroups: [] });
     } catch {
       // los catalogos son para el formulario de edicion; si fallan, igual se puede ver/aprobar/rechazar
     }
@@ -84,7 +90,7 @@ export default function ImportDetailPage() {
     load();
     loadCatalogs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [batchId]);
+  }, [batchId, activeGroupId]);
 
   async function handleApproveRow(stagingId: number) {
     setRowActionLoading(stagingId);
@@ -137,6 +143,25 @@ export default function ImportDetailPage() {
       setError(err instanceof ApiError ? err.message : "No se pudieron aprobar las facturas pendientes.");
     } finally {
       setBulkLoading(false);
+    }
+  }
+
+  async function handleAssignGroup() {
+    const grupoId = grupoParaAsignar ? Number(grupoParaAsignar) : null;
+    const nombreGrupo = grupoId ? groups.find((g) => g.id === grupoId)?.nombre : "Sin grupo";
+    if (!window.confirm(`¿Asignar TODAS las filas de esta importación a "${nombreGrupo}"? Esto pisa cualquier grupo detectado automáticamente o editado a mano.`)) {
+      return;
+    }
+    setAssigningGroup(true);
+    setError(null);
+    try {
+      const resultado = await api.assignBatchGroup(batchId, grupoId);
+      window.alert(`Listo: ${resultado.filas_actualizadas} filas actualizadas (${resultado.facturas_actualizadas} ya aprobadas).`);
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo asignar el grupo económico.");
+    } finally {
+      setAssigningGroup(false);
     }
   }
 
@@ -209,6 +234,28 @@ export default function ImportDetailPage() {
       </div>
 
       {error && <div className="error-banner" style={{ marginBottom: 16 }}>{error}</div>}
+
+      <div className="card" style={{ padding: 14, marginBottom: 20, display: "flex", gap: 10, alignItems: "center" }}>
+        <span className="faint" style={{ fontSize: 12 }}>Asignar TODA esta importación a un grupo económico:</span>
+        <select
+          value={grupoParaAsignar}
+          onChange={(e) => setGrupoParaAsignar(e.target.value)}
+          style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "6px 8px", color: "var(--text)", fontSize: 12.5, minWidth: 180 }}
+        >
+          <option value="">— Sin grupo —</option>
+          {groups.map((g) => (
+            <option key={g.id} value={g.id}>{g.nombre}</option>
+          ))}
+        </select>
+        <button className="btn" style={{ fontSize: 12, padding: "6px 12px" }} onClick={handleAssignGroup} disabled={assigningGroup}>
+          {assigningGroup ? "Asignando..." : "Asignar a todas las filas"}
+        </button>
+        {activeGroupId && (
+          <span className="faint" style={{ fontSize: 11.5, marginLeft: "auto" }}>
+            Viendo solo filas de: <strong>{groups.find((g) => g.id === activeGroupId)?.nombre}</strong>
+          </span>
+        )}
+      </div>
 
       {batch.resumen && (
         <div style={{ display: "flex", gap: 24, marginBottom: 24 }}>
@@ -318,7 +365,7 @@ export default function ImportDetailPage() {
                         {isEditing ? (
                           <EditStagingRowForm
                             row={row}
-                            catalogs={catalogs}
+                            catalogs={{ ...catalogs, economicGroups: groups }}
                             saving={isLoadingThis}
                             onCancel={() => setEditingRow(null)}
                             onSave={(updates) => handleSaveEdit(row.id, updates)}
@@ -347,6 +394,7 @@ export default function ImportDetailPage() {
                               Unidad de negocio: <span className="muted">{nombreCatalogo(catalogs.businessUnits, m.business_unit_id)}</span>
                               {"  ·  "}Empresa: <span className="muted">{nombreCatalogo(catalogs.companies, m.company_id)}</span>
                               {"  ·  "}Sucursal: <span className="muted">{nombreCatalogo(catalogs.branches, m.branch_id)}</span>
+                              {"  ·  "}Grupo económico: <span className="muted">{nombreCatalogo(groups, m.economic_group_id)}</span>
                             </div>
                             {row.motivo_rechazo && (
                               <div className="faint" style={{ fontSize: 12 }}>

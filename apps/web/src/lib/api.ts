@@ -74,7 +74,10 @@ export const api = {
   me: () =>
     request<{ id: number; email: string; nombre: string; roles: string[] }>("/auth/me"),
 
-  listImports: () => request<ImportBatch[]>("/imports"),
+  listImports: (economicGroupId?: number | null) => {
+    const qs = economicGroupId ? `?economic_group_id=${economicGroupId}` : "";
+    return request<ImportBatch[]>(`/imports${qs}`);
+  },
 
   getImport: (id: number) => request<ImportBatch>(`/imports/${id}`),
 
@@ -84,7 +87,16 @@ export const api = {
     return request<ImportBatch>("/imports/upload", { method: "POST", body: formData });
   },
 
-  previewImport: (id: number) => request<StagingRow[]>(`/imports/${id}/preview`),
+  previewImport: (id: number, economicGroupId?: number | null) => {
+    const qs = economicGroupId ? `?economic_group_id=${economicGroupId}` : "";
+    return request<StagingRow[]>(`/imports/${id}/preview${qs}`);
+  },
+
+  assignBatchGroup: (batchId: number, economicGroupId: number | null) =>
+    request<{ filas_actualizadas: number; facturas_actualizadas: number }>(
+      `/imports/${batchId}/assign-group`,
+      { method: "POST", body: JSON.stringify({ economic_group_id: economicGroupId }) }
+    ),
 
   approveImport: (id: number) =>
     request<{ filas_aprobadas: number; filas_excluidas_por_error: number }>(
@@ -445,6 +457,7 @@ export type StagingRowUpdate = {
   business_unit_id?: number;
   company_id?: number;
   branch_id?: number;
+  economic_group_id?: number;
 };
 
 export type ImportBatchSummary = {

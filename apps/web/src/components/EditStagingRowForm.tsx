@@ -11,6 +11,7 @@ type Catalogs = {
   businessUnits: CatalogItem[];
   companies: CatalogItem[];
   branches: CatalogItem[];
+  economicGroups: CatalogItem[];
 };
 
 const TIPOS_DOCUMENTO = ["Factura", "Nota de Credito", "Nota de Debito", "Factura de credito Pyme"];
@@ -89,6 +90,7 @@ export default function EditStagingRowForm({
     business_unit_id: m.business_unit_id ? Number(m.business_unit_id) : undefined,
     company_id: m.company_id ? Number(m.company_id) : undefined,
     branch_id: m.branch_id ? Number(m.branch_id) : undefined,
+    economic_group_id: m.economic_group_id ? Number(m.economic_group_id) : undefined,
   });
 
   function set<K extends keyof StagingRowUpdate>(key: K, value: StagingRowUpdate[K]) {
@@ -154,6 +156,7 @@ export default function EditStagingRowForm({
         <Select label="Empresa" value={form.company_id ?? ""} options={catalogs.companies} onChange={(v) => set("company_id", v)} />
 
         <Select label="Sucursal" value={form.branch_id ?? ""} options={catalogs.branches} onChange={(v) => set("branch_id", v)} />
+        <Select label="Grupo económico" value={form.economic_group_id ?? ""} options={catalogs.economicGroups} onChange={(v) => set("economic_group_id", v)} />
       </div>
 
       <div className="field">
