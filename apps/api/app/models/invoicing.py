@@ -21,6 +21,11 @@ class Invoice(Base, TimestampMixin):
     cost_center_id = Column(Integer, ForeignKey("cost_centers.id"), nullable=True, index=True)
     business_unit_id = Column(Integer, ForeignKey("business_units.id"), nullable=True, index=True)
     company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
+    economic_group_id = Column(Integer, ForeignKey("economic_groups.id"), nullable=True, index=True)
+    # ^ Se autocompleta con el grupo de la empresa (company_id) al aprobar la factura,
+    # pero se puede sobreescribir a mano (por fila o en bloque para todo un archivo) --
+    # es el "modelo hibrido" pedido: reportes de TSDocs que mezclan empresas de mas de
+    # un grupo economico necesitan permitir la correccion manual, no solo la automatica.
     branch_id = Column(Integer, ForeignKey("branches.id"), nullable=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
 

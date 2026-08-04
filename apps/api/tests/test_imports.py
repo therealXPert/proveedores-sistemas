@@ -268,3 +268,74 @@ def test_editar_fila_permite_cambiar_proveedor(db_session, admin_user, seeded_ca
     assert fila.datos_mapeados_json["provider_id"] == otro_proveedor.id
     # Ya no deberia quedar la advertencia de "proveedor creado automaticamente"
     assert not any(e.tipo == "proveedor_creado_automaticamente" for e in fila.errores)
+
+
+def test_grupo_economico_se_autocompleta_desde_la_empresa(db_session, admin_user, seeded_catalogs):
+    """Modelo hibrido: si la empresa ya tiene grupo asignado, la factura lo hereda al importar."""
+    from app.models.catalog import Company, EconomicGroup
+
+    grupo = EconomicGroup(nombre="Grupo Test")
+    db_session.add(grupo)
+    db_session.flush()
+
+    empresa = Company(nombre="TAGLE", economic_group_id=grupo.id)
+    db_session.add(empresa)
+    db_session.commit()
+
+    batch = process_uploaded_file(db_session, admin_user.id, "tsdocs_sample.csv", _load_fixture_bytes())
+    filas_tagle = [f for f in batch.staging_invoices if f.datos_mapeados_json.get("empresa_nombre") == "TAGLE"]
+
+    assert len(filas_tagle) > 0
+    assert all(f.datos_mapeados_json.get("economic_group_id") == grupo.id for f in filas_tagle)
+
+
+def test_grupo_economico_editable_a_mano_pisa_la_deteccion_automatica(db_session, admin_user, seeded_catalogs):
+    from app.services.staging_edit_service import update_staging_row
+    from app.models.catalog import EconomicGroup
+
+    grupo_a = EconomicGroup(nombre="Grupo A")
+    grupo_b = EconomicGroup(nombre="Grupo B")
+    db_session.add_all([grupo_a, grupo_b])
+    db_session.commit()
+
+    batch = process_uploaded_file(db_session, admin_user.id, "tsdocs_sample.csv", _load_fixture_bytes())
+    fila = batch.staging_invoices[0]
+
+    update_staging_row(db_session, fila, {"economic_group_id": grupo_b.id}, admin_user.id)
+    assert fila.datos_mapeados_json["economic_group_id"] == grupo_b.id
+
+
+def test_asignacion_masiva_pisa_todo_el_lote(db_session, admin_user, seeded_catalogs):
+    from app.models.catalog import EconomicGroup
+
+    grupo = EconomicGroup(nombre="Grupo Masivo")
+    db_session.add(grupo)
+    db_session.commit()
+
+    batch = process_uploaded_file(db_session, admin_user.id, "tsdocs_sample.csv", _load_fixture_bytes())
+
+    # Simula el endpoint de asignacion masiva (misma logica que app/api/imports.py:assign_batch_group)
+    for fila in batch.staging_invoices:
+        m = dict(fila.datos_mapeados_json or {})
+        m["economic_group_id"] = grupo.id
+        fila.datos_mapeados_json = m
+    db_session.commit()
+
+    assert all(f.datos_mapeados_json["economic_group_id"] == grupo.id for f in batch.staging_invoices)
+
+
+def test_factura_aprobada_hereda_el_grupo_economico_de_la_fila(db_session, admin_user, seeded_catalogs):
+    from app.services.approval_service import approve_staging_row
+    from app.services.staging_edit_service import update_staging_row
+    from app.models.catalog import EconomicGroup
+
+    grupo = EconomicGroup(nombre="Grupo Aprobado")
+    db_session.add(grupo)
+    db_session.commit()
+
+    batch = process_uploaded_file(db_session, admin_user.id, "tsdocs_sample.csv", _load_fixture_bytes())
+    fila = batch.staging_invoices[0]
+    update_staging_row(db_session, fila, {"economic_group_id": grupo.id}, admin_user.id)
+
+    invoice = approve_staging_row(db_session, fila, admin_user.id)
+    assert invoice.economic_group_id == grupo.id

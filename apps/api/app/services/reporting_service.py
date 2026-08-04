@@ -20,7 +20,7 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from app.models.invoicing import Invoice
-from app.models.catalog import Provider, ExpenseCategory, Area, Company
+from app.models.catalog import Provider, ExpenseCategory, Area
 from app.models.budget import Budget
 from app.models.importing import ImportBatch, StagingInvoice
 
@@ -41,7 +41,7 @@ def _invoices_query_rango(db: Session, fecha_desde: date, fecha_hasta: date, eco
         Invoice.fecha_emision <= datetime.combine(fecha_hasta, datetime.max.time()),
     )
     if economic_group_id:
-        q = q.join(Company, Company.id == Invoice.company_id).filter(Company.economic_group_id == economic_group_id)
+        q = q.filter(Invoice.economic_group_id == economic_group_id)
     return q
 
 

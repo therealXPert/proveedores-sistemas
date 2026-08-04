@@ -45,6 +45,7 @@ def _crear_invoice_desde_staging(db: Session, staging: StagingInvoice, batch: Im
         category_id=m.get("category_id"),
         cost_center_id=m.get("cost_center_id"),
         company_id=m.get("company_id"),
+        economic_group_id=m.get("economic_group_id"),
         branch_id=m.get("branch_id"),
         numero_factura=m.get("numero_factura"),
         tipo_documento=m.get("tipo_documento") or "Factura",

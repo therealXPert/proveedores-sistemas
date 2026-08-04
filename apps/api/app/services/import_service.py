@@ -84,6 +84,9 @@ def process_uploaded_file(db: Session, user_id: int, filename: str, content: byt
         mapped["branch_id"] = branch.id if branch else None
         mapped["category_id"] = category.id if category else None
         mapped["cost_center_id"] = cost_center.id if cost_center else None
+        # Grupo economico: se autocompleta con el de la empresa detectada (modelo hibrido,
+        # ver docs/decisiones-arquitectura.md). Queda editable por fila o en bloque despues.
+        mapped["economic_group_id"] = company.economic_group_id if company else None
 
         errores = validation.validar_fila(mapped, provider_encontrado=(provider is not None and not creado_auto))
         if advertencia_cuenta:

@@ -32,6 +32,7 @@ EDITABLE_FIELDS = {
     "business_unit_id",
     "company_id",
     "branch_id",
+    "economic_group_id",
 }
 
 

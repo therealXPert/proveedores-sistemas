@@ -108,8 +108,7 @@ def _invoice_filtered_query(db: Session, fecha_desde, fecha_hasta, provider_id, 
     if moneda:
         q = q.filter(Invoice.moneda == moneda)
     if economic_group_id:
-        from app.models.catalog import Company
-        q = q.join(Company, Company.id == Invoice.company_id).filter(Company.economic_group_id == economic_group_id)
+        q = q.filter(Invoice.economic_group_id == economic_group_id)
     return q.order_by(Invoice.fecha_emision.desc())
 
 

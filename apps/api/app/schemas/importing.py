@@ -56,6 +56,7 @@ class StagingRowUpdate(BaseModel):
     business_unit_id: Optional[int] = None
     company_id: Optional[int] = None
     branch_id: Optional[int] = None
+    economic_group_id: Optional[int] = None
 
 
 class ImportBatchSummary(BaseModel):

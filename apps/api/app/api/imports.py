@@ -1,10 +1,15 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.api.deps import get_current_user, require_role
 from app.models.security import User
 from app.models.importing import ImportBatch, StagingInvoice
+from app.models.invoicing import Invoice
+from app.models.audit import AuditEvent
 from app.schemas.importing import (
     ImportBatchOut,
     StagingInvoiceOut,
@@ -88,10 +93,28 @@ async def upload_file(
 
 @router.get("", response_model=list[ImportBatchOut])
 def list_batches(
+    economic_group_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return db.query(ImportBatch).order_by(ImportBatch.id.desc()).all()
+    """
+    Sin economic_group_id: se ven todas las importaciones (vista "Todos los grupos").
+    Con economic_group_id: solo las que tengan al menos una factura/fila de ese
+    grupo -- una carga "compartida" entre grupos puede aparecer en mas de uno.
+    """
+    batches = db.query(ImportBatch).order_by(ImportBatch.id.desc()).all()
+    if not economic_group_id:
+        return batches
+
+    filtrados = []
+    for b in batches:
+        pertenece = any(
+            (s.datos_mapeados_json or {}).get("economic_group_id") == economic_group_id
+            for s in b.staging_invoices
+        )
+        if pertenece:
+            filtrados.append(b)
+    return filtrados
 
 
 @router.get("/{batch_id}", response_model=ImportBatchOut)
@@ -106,12 +129,65 @@ def get_batch(
 @router.get("/{batch_id}/preview", response_model=list[StagingInvoiceOut])
 def preview_batch(
     batch_id: int,
+    economic_group_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Vista previa completa, con la descripcion sin truncar (sección 5 del diseño)."""
+    """
+    Vista previa completa, con la descripcion sin truncar (sección 5 del diseño).
+    Con economic_group_id: solo muestra las filas de ese grupo -- permite revisar
+    un archivo "compartido" entre grupos como si fuera exclusivo de uno solo.
+    """
     batch = _get_batch_or_404(db, batch_id)
-    return batch.staging_invoices
+    if not economic_group_id:
+        return batch.staging_invoices
+    return [
+        s for s in batch.staging_invoices
+        if (s.datos_mapeados_json or {}).get("economic_group_id") == economic_group_id
+    ]
+
+
+class AssignBatchGroupRequest(BaseModel):
+    economic_group_id: int | None = None
+
+
+@router.post("/{batch_id}/assign-group")
+def assign_batch_group(
+    batch_id: int,
+    payload: AssignBatchGroupRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("Administrador", "Analista")),
+):
+    """
+    Asignacion masiva: fuerza el mismo grupo economico a TODAS las filas de esta
+    importacion (tanto las que siguen en staging como las que ya se aprobaron),
+    pisando la deteccion automatica por empresa. Pensado para el caso de un
+    archivo que en realidad pertenece entero a un solo grupo.
+    """
+    batch = _get_batch_or_404(db, batch_id)
+    grupo_id = payload.economic_group_id
+
+    filas_actualizadas = 0
+    for staging in batch.staging_invoices:
+        m = dict(staging.datos_mapeados_json or {})
+        m["economic_group_id"] = grupo_id
+        staging.datos_mapeados_json = m
+        filas_actualizadas += 1
+
+    facturas_actualizadas = db.query(Invoice).filter(Invoice.import_batch_id == batch_id).update(
+        {"economic_group_id": grupo_id}, synchronize_session=False
+    )
+
+    db.add(AuditEvent(
+        user_id=current_user.id,
+        fecha=datetime.utcnow(),
+        accion="asignar_grupo_economico_lote",
+        entidad="import_batch",
+        entidad_id=batch_id,
+        valor_nuevo_json={"economic_group_id": grupo_id, "filas_staging": filas_actualizadas, "facturas_aprobadas": facturas_actualizadas},
+    ))
+    db.commit()
+    return {"filas_actualizadas": filas_actualizadas, "facturas_actualizadas": facturas_actualizadas}
 
 
 # --- Acciones por factura individual (la forma principal de trabajar) ---
